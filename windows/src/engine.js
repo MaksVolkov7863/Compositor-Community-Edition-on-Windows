@@ -3,395 +3,27 @@
  * Comprehensive Canvas, Layer, Tool, Adjustment & Selection Pipeline
  */
 
-// Headless mock canvas implementation for Node.js CI test automation
-function createMockCanvas(w, h) {
-    w = Math.max(1, Math.round(w || 1));
-    h = Math.max(1, Math.round(h || 1));
-    const bufW = Math.min(w, 4096);
-    const bufH = Math.min(h, 4096);
-    const buffer = new Uint8ClampedArray(bufW * bufH * 4);
-
-    const parseColor = (str) => {
-        if (!str) return { r: 255, g: 255, b: 255, a: 255 };
-        if (typeof str === 'object' && str !== null) {
-            if (str.stops && str.stops.length > 0) {
-                return parseColor(str.stops[0].color);
-            }
-            return { r: 255, g: 255, b: 255, a: 255 };
-        }
-        if (typeof str !== 'string') return { r: 255, g: 255, b: 255, a: 255 };
-        str = str.trim().toLowerCase();
-        const namedColors = {
-            black: { r: 0, g: 0, b: 0, a: 255 },
-            white: { r: 255, g: 255, b: 255, a: 255 },
-            transparent: { r: 0, g: 0, b: 0, a: 0 },
-            red: { r: 255, g: 0, b: 0, a: 255 },
-            green: { r: 0, g: 255, b: 0, a: 255 },
-            blue: { r: 0, g: 0, b: 255, a: 255 },
-            yellow: { r: 255, g: 255, b: 0, a: 255 },
-            cyan: { r: 0, g: 255, b: 255, a: 255 },
-            magenta: { r: 255, g: 0, b: 255, a: 255 }
-        };
-        if (namedColors[str]) return { ...namedColors[str] };
-        if (str.startsWith('#')) {
-            let hex = str.slice(1);
-            if (hex.length === 3) hex = hex.split('').map(c => c + c).join('');
-            if (hex.length === 6) {
-                const num = parseInt(hex, 16);
-                return { r: (num >> 16) & 255, g: (num >> 8) & 255, b: num & 255, a: 255 };
-            } else if (hex.length === 8) {
-                const num = parseInt(hex, 16);
-                return { r: (num >> 24) & 255, g: (num >> 16) & 255, b: (num >> 8) & 255, a: num & 255 };
-            }
-        }
-        const m = str.match(/rgba?\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*([\d.]+))?\)/);
-        if (m) {
-            return {
-                r: parseInt(m[1]),
-                g: parseInt(m[2]),
-                b: parseInt(m[3]),
-                a: m[4] !== undefined ? Math.round(parseFloat(m[4]) * 255) : 255
-            };
-        }
-        return { r: 255, g: 255, b: 255, a: 255 };
-    };
-
-    let currentPath = null;
-    const ctxObj = {
-        fillStyle: '#000000',
-        strokeStyle: '#000000',
-        globalAlpha: 1.0,
-        globalCompositeOperation: 'source-over',
-        filter: 'none',
-        font: '16px Segoe UI',
-        textAlign: 'left',
-        textBaseline: 'top',
-        lineWidth: 1,
-        lineDashOffset: 0,
-
-        save: () => {},
-        restore: () => {},
-        translate: () => {},
-        rotate: () => {},
-        scale: () => {},
-        setLineDash: () => {},
-
-        fillRect: (x, y, rw, rh) => {
-            let rx = Math.floor(x);
-            let ry = Math.floor(y);
-            let rwidth = Math.ceil(rw);
-            let rheight = Math.ceil(rh);
-            if (rwidth < 0) { rx += rwidth; rwidth = -rwidth; }
-            if (rheight < 0) { ry += rheight; rheight = -rheight; }
-
-            const col = parseColor(ctxObj.fillStyle);
-            const alpha = Math.round(col.a * ctxObj.globalAlpha);
-
-            for (let py = Math.max(0, ry); py < Math.min(bufH, ry + rheight); py++) {
-                for (let px = Math.max(0, rx); px < Math.min(bufW, rx + rwidth); px++) {
-                    const idx = (py * bufW + px) * 4;
-                    if (ctxObj.globalCompositeOperation === 'destination-out') {
-                        const factor = 1 - (col.a / 255) * ctxObj.globalAlpha;
-                        buffer[idx + 3] = Math.round(buffer[idx + 3] * factor);
-                    } else {
-                        buffer[idx] = col.r;
-                        buffer[idx + 1] = col.g;
-                        buffer[idx + 2] = col.b;
-                        buffer[idx + 3] = alpha;
-                    }
-                }
-            }
-        },
-
-        clearRect: (x, y, rw, rh) => {
-            let rx = Math.floor(x);
-            let ry = Math.floor(y);
-            let rwidth = Math.ceil(rw);
-            let rheight = Math.ceil(rh);
-            if (rwidth < 0) { rx += rwidth; rwidth = -rwidth; }
-            if (rheight < 0) { ry += rheight; rheight = -rheight; }
-
-            for (let py = Math.max(0, ry); py < Math.min(bufH, ry + rheight); py++) {
-                for (let px = Math.max(0, rx); px < Math.min(bufW, rx + rwidth); px++) {
-                    const idx = (py * bufW + px) * 4;
-                    buffer[idx] = 0; buffer[idx + 1] = 0; buffer[idx + 2] = 0; buffer[idx + 3] = 0;
-                }
-            }
-        },
-
-        beginPath: () => { currentPath = null; },
-        rect: (x, y, rw, rh) => { currentPath = { type: 'rect', x, y, rw, rh }; },
-        roundRect: (x, y, rw, rh, rad = 0) => { currentPath = { type: 'roundRect', x, y, rw, rh, rad }; },
-        ellipse: (cx, cy, rx, ry) => { currentPath = { type: 'ellipse', cx, cy, rx, ry }; },
-        arc: (cx, cy, r) => { currentPath = { type: 'ellipse', cx, cy, rx: r, ry: r }; },
-        moveTo: () => {},
-        lineTo: () => {},
-        closePath: () => {},
-
-        fill: () => {
-            if (!currentPath) return;
-            const col = parseColor(ctxObj.fillStyle);
-            const alpha = Math.round(col.a * ctxObj.globalAlpha);
-            const isDestOut = ctxObj.globalCompositeOperation === 'destination-out';
-
-            if (currentPath.type === 'rect') {
-                ctxObj.fillRect(currentPath.x, currentPath.y, currentPath.rw, currentPath.rh);
-            } else if (currentPath.type === 'roundRect') {
-                const { x, y, rw, rh, rad } = currentPath;
-                const r = Math.min(rad, Math.min(rw, rh) / 2);
-                for (let py = Math.max(0, Math.floor(y)); py < Math.min(bufH, Math.ceil(y + rh)); py++) {
-                    for (let px = Math.max(0, Math.floor(x)); px < Math.min(bufW, Math.ceil(x + rw)); px++) {
-                        let inCorner = false;
-                        let cornerDx = 0, cornerDy = 0;
-                        if (px < x + r && py < y + r) { inCorner = true; cornerDx = px - (x + r); cornerDy = py - (y + r); }
-                        else if (px > x + rw - r && py < y + r) { inCorner = true; cornerDx = px - (x + rw - r); cornerDy = py - (y + r); }
-                        else if (px < x + r && py > y + rh - r) { inCorner = true; cornerDx = px - (x + r); cornerDy = py - (y + rh - r); }
-                        else if (px > x + rw - r && py > y + rh - r) { inCorner = true; cornerDx = px - (x + rw - r); cornerDy = py - (y + rh - r); }
-
-                        if (inCorner && (cornerDx * cornerDx + cornerDy * cornerDy > r * r)) {
-                            continue;
-                        }
-                        const idx = (py * bufW + px) * 4;
-                        if (isDestOut) {
-                            buffer[idx + 3] = Math.round(buffer[idx + 3] * (1 - alpha / 255));
-                        } else {
-                            buffer[idx] = col.r; buffer[idx + 1] = col.g; buffer[idx + 2] = col.b; buffer[idx + 3] = alpha;
-                        }
-                    }
-                }
-            } else if (currentPath.type === 'ellipse') {
-                const { cx, cy, rx, ry } = currentPath;
-                for (let py = Math.max(0, Math.floor(cy - ry)); py <= Math.min(bufH - 1, Math.ceil(cy + ry)); py++) {
-                    for (let px = Math.max(0, Math.floor(cx - rx)); px <= Math.min(bufW - 1, Math.ceil(cx + rx)); px++) {
-                        const normX = (px - cx) / Math.max(1, rx);
-                        const normY = (py - cy) / Math.max(1, ry);
-                        if (normX * normX + normY * normY <= 1.0) {
-                            const idx = (py * bufW + px) * 4;
-                            if (isDestOut) {
-                                buffer[idx + 3] = Math.round(buffer[idx + 3] * (1 - alpha / 255));
-                            } else {
-                                buffer[idx] = col.r; buffer[idx + 1] = col.g; buffer[idx + 2] = col.b; buffer[idx + 3] = alpha;
-                            }
-                        }
-                    }
-                }
-            }
-        },
-
-        stroke: () => {
-            if (!currentPath) return;
-            const col = parseColor(ctxObj.strokeStyle);
-            const alpha = Math.round(col.a * ctxObj.globalAlpha);
-            if (currentPath.type === 'rect') {
-                const { x, y, rw, rh } = currentPath;
-                const lw = Math.max(1, Math.round(ctxObj.lineWidth || 1));
-                ctxObj.fillRect(x, y, rw, lw);
-                ctxObj.fillRect(x, y + rh - lw, rw, lw);
-                ctxObj.fillRect(x, y, lw, rh);
-                ctxObj.fillRect(x + rw - lw, y, lw, rh);
-            }
-        },
-
-        clip: () => {},
-
-        fillText: (text, x, y) => {
-            const col = parseColor(ctxObj.fillStyle);
-            const alpha = Math.round(col.a * ctxObj.globalAlpha);
-            const tw = Math.max(10, Math.min(bufW - x, (text ? text.length : 1) * 12));
-            const th = 16;
-            for (let py = Math.max(0, Math.floor(y)); py < Math.min(bufH, Math.ceil(y + th)); py++) {
-                for (let px = Math.max(0, Math.floor(x)); px < Math.min(bufW, Math.ceil(x + tw)); px++) {
-                    const idx = (py * bufW + px) * 4;
-                    buffer[idx] = col.r; buffer[idx + 1] = col.g; buffer[idx + 2] = col.b; buffer[idx + 3] = alpha;
-                }
-            }
-        },
-
-        strokeText: () => {},
-        measureText: (text) => ({ width: (text ? text.length : 0) * 12, actualBoundingBoxAscent: 12, actualBoundingBoxDescent: 4 }),
-
-        createLinearGradient: () => {
-            const stops = [];
-            return {
-                stops,
-                addColorStop: (pos, color) => { stops.push({ pos, color }); }
-            };
-        },
-
-        createRadialGradient: () => {
-            const stops = [];
-            return {
-                stops,
-                addColorStop: (pos, color) => { stops.push({ pos, color }); }
-            };
-        },
-
-        getImageData: (x = 0, y = 0, gw = w, gh = h) => {
-            const clampedW = Math.min(Math.max(1, gw), bufW);
-            const clampedH = Math.min(Math.max(1, gh), bufH);
-            const sub = new Uint8ClampedArray(clampedW * clampedH * 4);
-            for (let py = 0; py < clampedH; py++) {
-                for (let px = 0; px < clampedW; px++) {
-                    const srcX = x + px;
-                    const srcY = y + py;
-                    const dstIdx = (py * clampedW + px) * 4;
-                    if (srcX >= 0 && srcX < bufW && srcY >= 0 && srcY < bufH) {
-                        const srcIdx = (srcY * bufW + srcX) * 4;
-                        sub[dstIdx] = buffer[srcIdx];
-                        sub[dstIdx + 1] = buffer[srcIdx + 1];
-                        sub[dstIdx + 2] = buffer[srcIdx + 2];
-                        sub[dstIdx + 3] = buffer[srcIdx + 3];
-                    }
-                }
-            }
-            return { data: sub, width: clampedW, height: clampedH };
-        },
-
-        createImageData: (wOrImg, hOrNone) => {
-            let cw = typeof wOrImg === 'object' && wOrImg !== null ? wOrImg.width : wOrImg;
-            let ch = typeof wOrImg === 'object' && wOrImg !== null ? wOrImg.height : hOrNone;
-            cw = Math.max(1, Math.round(cw || 1));
-            ch = Math.max(1, Math.round(ch || 1));
-            return {
-                width: cw,
-                height: ch,
-                data: new Uint8ClampedArray(cw * ch * 4)
-            };
-        },
-
-        putImageData: (imgData, x = 0, y = 0) => {
-            if (!imgData || !imgData.data) return;
-            const iw = imgData.width || 0;
-            const ih = imgData.height || 0;
-            for (let py = 0; py < ih; py++) {
-                for (let px = 0; px < iw; px++) {
-                    const dstX = x + px;
-                    const dstY = y + py;
-                    if (dstX >= 0 && dstX < bufW && dstY >= 0 && dstY < bufH) {
-                        const srcIdx = (py * iw + px) * 4;
-                        const dstIdx = (dstY * bufW + dstX) * 4;
-                        buffer[dstIdx] = imgData.data[srcIdx];
-                        buffer[dstIdx + 1] = imgData.data[srcIdx + 1];
-                        buffer[dstIdx + 2] = imgData.data[srcIdx + 2];
-                        buffer[dstIdx + 3] = imgData.data[srcIdx + 3];
-                    }
-                }
-            }
-        },
-
-        drawImage: (src, ...args) => {
-            if (!src) return;
-            let sdata = null, sw = 0, sh = 0;
-            if (src.getContext) {
-                const sctx = src.getContext('2d');
-                sw = src.width;
-                sh = src.height;
-                const safeW = Math.min(sw, 4096);
-                const safeH = Math.min(sh, 4096);
-                sdata = sctx.getImageData(0, 0, safeW, safeH).data;
-                sw = safeW;
-                sh = safeH;
-            } else if (src.data) {
-                sw = src.width;
-                sh = src.height;
-                sdata = src.data;
-            }
-            if (!sdata) return;
-
-            let dx = 0, dy = 0, dw = sw, dh = sh;
-            if (args.length === 2) {
-                [dx, dy] = args;
-            } else if (args.length === 4) {
-                [dx, dy, dw, dh] = args;
-            } else if (args.length >= 8) {
-                dx = args[4]; dy = args[5]; dw = args[6]; dh = args[7];
-            }
-
-            const isDestIn = ctxObj.globalCompositeOperation === 'destination-in';
-            const isDestOut = ctxObj.globalCompositeOperation === 'destination-out';
-            const alpha = ctxObj.globalAlpha !== undefined ? ctxObj.globalAlpha : 1.0;
-
-            for (let py = 0; py < dh; py++) {
-                for (let px = 0; px < dw; px++) {
-                    const dstX = Math.floor(dx + px);
-                    const dstY = Math.floor(dy + py);
-                    if (dstX < 0 || dstX >= bufW || dstY < 0 || dstY >= bufH) continue;
-
-                    const srcX = Math.floor((px / dw) * sw);
-                    const srcY = Math.floor((py / dh) * sh);
-                    if (srcX < 0 || srcX >= sw || srcY < 0 || srcY >= sh) continue;
-
-                    const sIdx = (srcY * sw + srcX) * 4;
-                    const dIdx = (dstY * bufW + dstX) * 4;
-
-                    if (isDestIn) {
-                        let srcAlpha = (sdata[sIdx + 3] / 255) * alpha;
-                        if (sdata[sIdx + 3] === 255 && sdata[sIdx] === sdata[sIdx + 1] && sdata[sIdx] === sdata[sIdx + 2]) {
-                            srcAlpha *= (sdata[sIdx] / 255);
-                        }
-                        buffer[dIdx + 3] = Math.round(buffer[dIdx + 3] * srcAlpha);
-                    } else if (isDestOut) {
-                        const srcAlpha = (sdata[sIdx + 3] / 255) * alpha;
-                        buffer[dIdx + 3] = Math.round(buffer[dIdx + 3] * (1 - srcAlpha));
-                    } else {
-                        const srcA = (sdata[sIdx + 3] / 255) * alpha;
-                        if (srcA <= 0) continue;
-                        if (srcA >= 1) {
-                            buffer[dIdx] = sdata[sIdx];
-                            buffer[dIdx + 1] = sdata[sIdx + 1];
-                            buffer[dIdx + 2] = sdata[sIdx + 2];
-                            buffer[dIdx + 3] = 255;
-                        } else {
-                            const dstA = buffer[dIdx + 3] / 255;
-                            const outA = srcA + dstA * (1 - srcA);
-                            if (outA > 0) {
-                                buffer[dIdx] = Math.round((sdata[sIdx] * srcA + buffer[dIdx] * dstA * (1 - srcA)) / outA);
-                                buffer[dIdx + 1] = Math.round((sdata[sIdx + 1] * srcA + buffer[dIdx + 1] * dstA * (1 - srcA)) / outA);
-                                buffer[dIdx + 2] = Math.round((sdata[sIdx + 2] * srcA + buffer[dIdx + 2] * dstA * (1 - srcA)) / outA);
-                                buffer[dIdx + 3] = Math.round(outA * 255);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    };
-
-    return {
-        width: w,
-        height: h,
-        getContext: () => ctxObj,
-        toDataURL: (format = 'image/png') => `data:${format};base64,mock`,
-        toBlob: (cb, type = 'image/png') => { if (cb) cb({ size: buffer.length, type }); }
-    };
-}
-
-if (typeof document === 'undefined') {
-    globalThis.document = {
-        createElement: (tag) => {
-            if (tag === 'canvas') {
-                return createMockCanvas(800, 600);
-            }
-            return {};
-        }
-    };
-}
-if (typeof window === 'undefined') {
-    globalThis.window = { innerWidth: 1920, innerHeight: 1080 };
-}
-if (typeof requestAnimationFrame === 'undefined') {
-    globalThis.requestAnimationFrame = () => {};
-}
-if (typeof Path2D === 'undefined') {
-    globalThis.Path2D = class {
-        rect() {}
-        ellipse() {}
-        moveTo() {}
-        lineTo() {}
-        closePath() {}
-        addPath() {}
-    };
-}
+// Headless mock canvas implementation and submodules
+const {
+    createMockCanvas,
+    initHeadlessPolyfills,
+    BLEND_MODES,
+    mapBlendMode,
+    applyDither: moduleApplyDither,
+    applyScanlines: moduleApplyScanlines,
+    applyVignette: moduleApplyVignette,
+    applySharpen: moduleApplySharpen,
+    applyBloomGlow: moduleApplyBloomGlow,
+    applyBlurBrush: moduleApplyBlurBrush,
+    normalizeRotation: moduleNormalizeRotation,
+    snappedResize: moduleSnappedResize,
+    cropLayerToCanvas: moduleCropLayerToCanvas,
+    validateOuterGlow: moduleValidateOuterGlow,
+    validateInnerGlow: moduleValidateInnerGlow,
+    validateColorOverlay: moduleValidateColorOverlay,
+    unitToPixels: moduleUnitToPixels,
+    pixelsToUnitText: modulePixelsToUnitText
+} = require('./engine/index');
 
 class CompositorEngine {
     constructor(canvasElement, overlayElement) {
@@ -808,24 +440,7 @@ class CompositorEngine {
     // --- Rendering Pipeline ---
 
     mapBlendMode(mode) {
-        switch (mode) {
-            case 'Multiply': return 'multiply';
-            case 'Screen': return 'screen';
-            case 'Overlay': return 'overlay';
-            case 'Darken': return 'darken';
-            case 'Lighten': return 'lighten';
-            case 'Color Dodge': return 'color-dodge';
-            case 'Color Burn': return 'color-burn';
-            case 'Difference': return 'difference';
-            case 'Exclusion': return 'exclusion';
-            case 'Soft Light': return 'soft-light';
-            case 'Hard Light': return 'hard-light';
-            case 'Hue': return 'hue';
-            case 'Saturation': return 'saturation';
-            case 'Color': return 'color';
-            case 'Luminosity': return 'luminosity';
-            default: return 'source-over';
-        }
+        return mapBlendMode(mode);
     }
 
     render() {
@@ -2510,19 +2125,7 @@ class CompositorEngine {
     // --- Extended Feature Parity Methods ---
 
     static get BLEND_MODES() {
-        return [
-            'Normal',
-            'Multiply',
-            'Screen',
-            'Overlay',
-            'Darken',
-            'Lighten',
-            'Color Dodge',
-            'Color Burn',
-            'Difference',
-            'Soft Light',
-            'Hard Light'
-        ];
+        return BLEND_MODES;
     }
 
     cycleBlendMode(forward = true) {
@@ -3148,13 +2751,7 @@ class CompositorEngine {
     // --- Outer Glow & Layer Effects ---
 
     validateOuterGlow(effect) {
-        if (!effect || typeof effect !== 'object') return false;
-        if (typeof effect.size !== 'number' || effect.size < 0) return false;
-        if (typeof effect.opacity !== 'number' || effect.opacity < 0 || effect.opacity > 1) return false;
-        if (effect.red !== undefined && (effect.red < 0 || effect.red > 1)) return false;
-        if (effect.green !== undefined && (effect.green < 0 || effect.green > 1)) return false;
-        if (effect.blue !== undefined && (effect.blue < 0 || effect.blue > 1)) return false;
-        return true;
+        return moduleValidateOuterGlow(effect);
     }
 
     setOuterGlow(layerId, effect) {
@@ -3177,13 +2774,7 @@ class CompositorEngine {
     }
 
     validateInnerGlow(effect) {
-        if (!effect || typeof effect !== 'object') return false;
-        if (typeof effect.size !== 'number' || effect.size < 0 || effect.size > 500) return false;
-        if (typeof effect.opacity !== 'number' || effect.opacity < 0 || effect.opacity > 1) return false;
-        if (effect.red !== undefined && (typeof effect.red !== 'number' || effect.red < 0 || effect.red > 1)) return false;
-        if (effect.green !== undefined && (typeof effect.green !== 'number' || effect.green < 0 || effect.green > 1)) return false;
-        if (effect.blue !== undefined && (typeof effect.blue !== 'number' || effect.blue < 0 || effect.blue > 1)) return false;
-        return true;
+        return moduleValidateInnerGlow(effect);
     }
 
     setInnerGlow(layerId, effect) {
@@ -3213,12 +2804,7 @@ class CompositorEngine {
     }
 
     validateColorOverlay(effect) {
-        if (!effect || typeof effect !== 'object') return false;
-        if (effect.opacity !== undefined && (typeof effect.opacity !== 'number' || effect.opacity < 0 || effect.opacity > 1)) return false;
-        if (effect.red !== undefined && (typeof effect.red !== 'number' || effect.red < 0 || effect.red > 1)) return false;
-        if (effect.green !== undefined && (typeof effect.green !== 'number' || effect.green < 0 || effect.green > 1)) return false;
-        if (effect.blue !== undefined && (typeof effect.blue !== 'number' || effect.blue < 0 || effect.blue > 1)) return false;
-        return true;
+        return moduleValidateColorOverlay(effect);
     }
 
     setColorOverlay(layerId, effect) {
@@ -3251,287 +2837,58 @@ class CompositorEngine {
     applyDither(layerId, options = {}) {
         const layer = this.layers.find(l => l.id === layerId);
         if (!layer || !layer.canvas) return false;
-
-        const ctx = layer.ctx || layer.canvas.getContext('2d');
-        const imgData = ctx.getImageData(0, 0, layer.width, layer.height);
-        const data = imgData.data;
-        const w = layer.width, h = layer.height;
-
-        const method = options.method || 'bayer4'; // 'bayer2', 'bayer4', 'bayer8', 'floyd-steinberg', 'atkinson'
-        const chunky = Math.max(1, parseInt(options.chunky) || 1);
-        const palette = options.palette || 'mono'; // 'mono', 'gray2', 'rgb3', 'cga'
-
-        // 1. Chunky pixel downsampling if chunky > 1
-        if (chunky > 1) {
-            for (let y = 0; y < h; y += chunky) {
-                for (let x = 0; x < w; x += chunky) {
-                    const i = (y * w + x) * 4;
-                    const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3];
-                    for (let cy = 0; cy < chunky && (y + cy) < h; cy++) {
-                        for (let cx = 0; cx < chunky && (x + cx) < w; cx++) {
-                            const idx = ((y + cy) * w + (x + cx)) * 4;
-                            data[idx] = r;
-                            data[idx + 1] = g;
-                            data[idx + 2] = b;
-                            data[idx + 3] = a;
-                        }
-                    }
-                }
-            }
+        const ok = moduleApplyDither(layer, options);
+        if (ok) {
+            this.recordHistory('Filter: Dither');
+            this.render();
         }
-
-        // Standard Bayer matrices normalized to [-0.5, 0.5]
-        const bayer2 = [
-            [0, 2],
-            [3, 1]
-        ].map(row => row.map(v => (v / 4) - 0.5));
-
-        const bayer4 = [
-            [ 0,  8,  2, 10],
-            [12,  4, 14,  6],
-            [ 3, 11,  1,  9],
-            [15,  7, 13,  5]
-        ].map(row => row.map(v => (v / 16) - 0.5));
-
-        const bayer8 = [
-            [ 0, 32,  8, 40,  2, 34, 10, 42],
-            [48, 16, 56, 24, 50, 18, 58, 26],
-            [12, 44,  4, 36, 14, 46,  6, 38],
-            [60, 28, 52, 20, 62, 30, 54, 22],
-            [ 3, 35, 11, 43,  1, 33,  9, 41],
-            [51, 19, 59, 27, 49, 17, 57, 25],
-            [15, 47,  7, 39, 13, 45,  5, 37],
-            [63, 31, 55, 23, 61, 29, 53, 21]
-        ].map(row => row.map(v => (v / 64) - 0.5));
-
-        if (method.startsWith('bayer')) {
-            const matrix = method === 'bayer2' ? bayer2 : (method === 'bayer8' ? bayer8 : bayer4);
-            const mSize = matrix.length;
-            const spread = options.spread !== undefined ? options.spread : 64;
-
-            for (let y = 0; y < h; y++) {
-                for (let x = 0; x < w; x++) {
-                    const i = (y * w + x) * 4;
-                    if (data[i + 3] === 0) continue;
-
-                    const threshold = matrix[y % mSize][x % mSize] * spread;
-                    for (let c = 0; c < 3; c++) {
-                        let val = data[i + c] + threshold;
-                        if (palette === 'mono') {
-                            val = val >= 128 ? 255 : 0;
-                        } else if (palette === 'gray2') {
-                            val = Math.round(val / 85) * 85;
-                        } else {
-                            val = Math.round(val / 64) * 64;
-                        }
-                        data[i + c] = Math.max(0, Math.min(255, val));
-                    }
-                }
-            }
-        } else if (method === 'floyd-steinberg' || method === 'atkinson') {
-            // Error diffusion
-            const isAtkinson = method === 'atkinson';
-            for (let y = 0; y < h; y++) {
-                for (let x = 0; x < w; x++) {
-                    const i = (y * w + x) * 4;
-                    if (data[i + 3] === 0) continue;
-
-                    for (let c = 0; c < 3; c++) {
-                        const oldVal = data[i + c];
-                        const newVal = oldVal >= 128 ? 255 : 0;
-                        data[i + c] = newVal;
-                        const err = oldVal - newVal;
-
-                        if (isAtkinson) {
-                            const diffuse = (dx, dy) => {
-                                const nx = x + dx, ny = y + dy;
-                                if (nx >= 0 && nx < w && ny >= 0 && ny < h) {
-                                    const ni = (ny * w + nx) * 4 + c;
-                                    data[ni] = Math.max(0, Math.min(255, data[ni] + (err >> 3)));
-                                }
-                            };
-                            diffuse(1, 0); diffuse(2, 0);
-                            diffuse(-1, 1); diffuse(0, 1); diffuse(1, 1);
-                            diffuse(0, 2);
-                        } else {
-                            const diffuse = (dx, dy, factor) => {
-                                const nx = x + dx, ny = y + dy;
-                                if (nx >= 0 && nx < w && ny >= 0 && ny < h) {
-                                    const ni = (ny * w + nx) * 4 + c;
-                                    data[ni] = Math.max(0, Math.min(255, data[ni] + (err * factor / 16)));
-                                }
-                            };
-                            diffuse(1, 0, 7);
-                            diffuse(-1, 1, 3);
-                            diffuse(0, 1, 5);
-                            diffuse(1, 1, 1);
-                        }
-                    }
-                }
-            }
-        }
-
-        ctx.putImageData(imgData, 0, 0);
-        this.recordHistory('Filter: Dither');
-        this.render();
-        return true;
+        return ok;
     }
 
     // --- Scanlines Filter (Mac Scanlines parity) ---
     applyScanlines(layerId, options = {}) {
         const layer = this.layers.find(l => l.id === layerId);
         if (!layer || !layer.canvas) return false;
-
-        const ctx = layer.ctx || layer.canvas.getContext('2d');
-        const imgData = ctx.getImageData(0, 0, layer.width, layer.height);
-        const data = imgData.data;
-        const w = layer.width, h = layer.height;
-
-        const spacing = Math.max(2, parseInt(options.lineSpacing || options.spacing) || 4);
-        const lineWidth = Math.max(1, parseInt(options.lineWidth || options.thickness) || 1);
-        const intensity = options.intensity !== undefined ? options.intensity : (options.opacity !== undefined ? options.opacity : 0.5);
-        const orientation = options.orientation || 'horizontal';
-        const glow = options.glow || 0;
-        const blackLevel = options.blackLevel || 0;
-
-        for (let y = 0; y < h; y++) {
-            for (let x = 0; x < w; x++) {
-                const i = (y * w + x) * 4;
-                if (data[i + 3] === 0) continue;
-
-                const pos = orientation === 'horizontal' ? y : x;
-                const bandPos = pos % spacing;
-                const isLine = bandPos < lineWidth;
-
-                if (!isLine) {
-                    const factor = Math.max(0, 1 - intensity * (1 - glow * 0.005));
-                    data[i] = Math.round(data[i] * factor + blackLevel);
-                    data[i + 1] = Math.round(data[i + 1] * factor + blackLevel);
-                    data[i + 2] = Math.round(data[i + 2] * factor + blackLevel);
-                } else if (blackLevel > 0) {
-                    data[i] = Math.min(255, data[i] + blackLevel);
-                    data[i + 1] = Math.min(255, data[i + 1] + blackLevel);
-                    data[i + 2] = Math.min(255, data[i + 2] + blackLevel);
-                }
-            }
+        const ok = moduleApplyScanlines(layer, options);
+        if (ok) {
+            this.recordHistory('Filter: Scanlines');
+            this.render();
         }
-
-        ctx.putImageData(imgData, 0, 0);
-        this.recordHistory('Filter: Scanlines');
-        this.render();
-        return true;
+        return ok;
     }
 
     // --- Finishing Filters (Vignette, Sharpen, Bloom/Glow) ---
     applyVignette(layerId, options = {}) {
         const layer = this.layers.find(l => l.id === layerId);
         if (!layer || !layer.canvas) return false;
-
-        const ctx = layer.ctx || layer.canvas.getContext('2d');
-        const imgData = ctx.getImageData(0, 0, layer.width, layer.height);
-        const data = imgData.data;
-        const w = layer.width, h = layer.height;
-
-        const amount = options.amount !== undefined ? options.amount : 0.5;
-        const radius = options.radius !== undefined ? options.radius : 0.8;
-        const roundness = options.roundness !== undefined ? options.roundness : 1.0;
-        const cx = w / 2, cy = h / 2;
-        const maxDist = Math.sqrt(cx * cx + cy * cy) * radius;
-
-        for (let y = 0; y < h; y++) {
-            for (let x = 0; x < w; x++) {
-                const i = (y * w + x) * 4;
-                if (data[i + 3] === 0) continue;
-
-                const dx = (x - cx) * (roundness === 1 ? 1 : (w / h));
-                const dy = y - cy;
-                const dist = Math.sqrt(dx * dx + dy * dy);
-
-                if (dist > maxDist * 0.5) {
-                    const vigFactor = Math.min(1, (dist - maxDist * 0.5) / (maxDist * 0.5));
-                    const darken = 1 - (vigFactor * amount);
-                    data[i] = Math.max(0, Math.round(data[i] * darken));
-                    data[i + 1] = Math.max(0, Math.round(data[i + 1] * darken));
-                    data[i + 2] = Math.max(0, Math.round(data[i + 2] * darken));
-                }
-            }
+        const ok = moduleApplyVignette(layer, options);
+        if (ok) {
+            this.recordHistory('Filter: Vignette');
+            this.render();
         }
-
-        ctx.putImageData(imgData, 0, 0);
-        this.recordHistory('Filter: Vignette');
-        this.render();
-        return true;
+        return ok;
     }
 
     applySharpen(layerId, amount = 0.5) {
         const layer = this.layers.find(l => l.id === layerId);
         if (!layer || !layer.canvas) return false;
-
-        const ctx = layer.ctx || layer.canvas.getContext('2d');
-        const src = ctx.getImageData(0, 0, layer.width, layer.height);
-        const dst = ctx.createImageData(layer.width, layer.height);
-        const s = src.data, d = dst.data;
-        const w = layer.width, h = layer.height;
-
-        const strength = Math.max(0.1, amount);
-        const center = 1 + 4 * strength;
-        const edge = -strength;
-
-        for (let y = 0; y < h; y++) {
-            for (let x = 0; x < w; x++) {
-                const i = (y * w + x) * 4;
-                d[i + 3] = s[i + 3];
-                if (s[i + 3] === 0 || x === 0 || y === 0 || x === w - 1 || y === h - 1) {
-                    d[i] = s[i]; d[i + 1] = s[i + 1]; d[i + 2] = s[i + 2];
-                    continue;
-                }
-
-                for (let c = 0; c < 3; c++) {
-                    const top = s[((y - 1) * w + x) * 4 + c];
-                    const bottom = s[((y + 1) * w + x) * 4 + c];
-                    const left = s[(y * w + (x - 1)) * 4 + c];
-                    const right = s[(y * w + (x + 1)) * 4 + c];
-                    const mid = s[i + c];
-
-                    const val = mid * center + (top + bottom + left + right) * edge;
-                    d[i + c] = Math.max(0, Math.min(255, Math.round(val)));
-                }
-            }
+        const ok = moduleApplySharpen(layer, amount);
+        if (ok) {
+            this.recordHistory('Filter: Sharpen');
+            this.render();
         }
-
-        ctx.putImageData(dst, 0, 0);
-        this.recordHistory('Filter: Sharpen');
-        this.render();
-        return true;
+        return ok;
     }
 
     applyBloomGlow(layerId, options = {}) {
         const layer = this.layers.find(l => l.id === layerId);
         if (!layer || !layer.canvas) return false;
-
-        const ctx = layer.ctx || layer.canvas.getContext('2d');
-        const imgData = ctx.getImageData(0, 0, layer.width, layer.height);
-        const data = imgData.data;
-        const w = layer.width, h = layer.height;
-
-        const threshold = options.threshold !== undefined ? options.threshold : 180;
-        const intensity = options.intensity !== undefined ? options.intensity : 0.6;
-
-        for (let i = 0; i < data.length; i += 4) {
-            if (data[i + 3] === 0) continue;
-            const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-            if (lum > threshold) {
-                const boost = (lum - threshold) * intensity;
-                data[i] = Math.min(255, data[i] + boost);
-                data[i + 1] = Math.min(255, data[i + 1] + boost);
-                data[i + 2] = Math.min(255, data[i + 2] + boost);
-            }
+        const ok = moduleApplyBloomGlow(layer, options);
+        if (ok) {
+            this.recordHistory('Filter: Bloom / Glow');
+            this.render();
         }
-
-        ctx.putImageData(imgData, 0, 0);
-        this.recordHistory('Filter: Bloom / Glow');
-        this.render();
-        return true;
+        return ok;
     }
 
     // --- Blur Brush Tool (Mac BlurBrush parity) ---
@@ -3541,69 +2898,17 @@ class CompositorEngine {
 
         const targetCanvas = isMask ? layer.maskCanvas : layer.canvas;
         if (!targetCanvas) return false;
-        const targetCtx = targetCanvas.getContext('2d');
 
-        const r = Math.max(1, Math.round(radius));
-        const lx = Math.round(x - layer.x);
-        const ly = Math.round(y - layer.y);
-
-        const x0 = Math.max(0, lx - r);
-        const y0 = Math.max(0, ly - r);
-        const x1 = Math.min(layer.width, lx + r);
-        const y1 = Math.min(layer.height, ly + r);
-        const bw = x1 - x0;
-        const bh = y1 - y0;
-
-        if (bw <= 0 || bh <= 0) return false;
-
-        const patch = targetCtx.getImageData(x0, y0, bw, bh);
-        const pData = patch.data;
-        const copy = new Uint8Array(pData);
-
-        for (let py = 1; py < bh - 1; py++) {
-            for (let px = 1; px < bw - 1; px++) {
-                const dx = (x0 + px) - lx;
-                const dy = (y0 + py) - ly;
-                const distSq = dx * dx + dy * dy;
-                if (distSq > r * r) continue;
-
-                const falloff = (1 - Math.sqrt(distSq) / r) * strength;
-                const idx = (py * bw + px) * 4;
-
-                for (let c = 0; c < 4; c++) {
-                    let sum = 0;
-                    for (let ky = -1; ky <= 1; ky++) {
-                        for (let kx = -1; kx <= 1; kx++) {
-                            sum += copy[((py + ky) * bw + (px + kx)) * 4 + c];
-                        }
-                    }
-                    const avg = sum / 9;
-                    pData[idx + c] = Math.round(copy[idx + c] * (1 - falloff) + avg * falloff);
-                }
-            }
+        const ok = moduleApplyBlurBrush(targetCanvas, layer.x, layer.y, layer.width, layer.height, x, y, radius, strength);
+        if (ok) {
+            this.render();
         }
-
-        targetCtx.putImageData(patch, x0, y0);
-        this.render();
-        return true;
+        return ok;
     }
 
     // --- Canvas Viewport Rotation (Mac CanvasRotation parity) ---
     setCanvasRotation(angle) {
-        let norm = angle % 360;
-        if (norm > 180) norm -= 360;
-        if (norm < -180) norm += 360;
-
-        // Snapping within 5 degrees to 0, 90, -90, 180
-        const snapThreshold = 5;
-        for (const snap of [0, 90, -90, 180, -180]) {
-            if (Math.abs(norm - snap) <= snapThreshold) {
-                norm = snap;
-                break;
-            }
-        }
-
-        this.canvasRotation = norm;
+        this.canvasRotation = moduleNormalizeRotation(angle);
         this.render();
         return this.canvasRotation;
     }
@@ -3623,26 +2928,12 @@ class CompositorEngine {
         const layer = this.layers.find(l => l.id === layerId);
         if (!layer || !layer.canvas) return false;
 
-        const newX = Math.max(0, layer.x);
-        const newY = Math.max(0, layer.y);
-        const newW = Math.max(1, Math.min(this.width - newX, layer.width));
-        const newH = Math.max(1, Math.min(this.height - newY, layer.height));
-
-        const croppedCanvas = this.createCanvas(newW, newH);
-        const cCtx = croppedCanvas.getContext('2d');
-        cCtx.drawImage(layer.canvas, newX - layer.x, newY - layer.y, newW, newH, 0, 0, newW, newH);
-
-        layer.canvas = croppedCanvas;
-        layer.ctx = cCtx;
-        layer.x = newX;
-        layer.y = newY;
-        layer.width = newW;
-        layer.height = newH;
-        layer.croppedToCanvas = true;
-
-        this.recordHistory('Crop Layer to Canvas');
-        this.render();
-        return true;
+        const ok = moduleCropLayerToCanvas(layer, this.width, this.height, (w, h) => this.createCanvas(w, h));
+        if (ok) {
+            this.recordHistory('Crop Layer to Canvas');
+            this.render();
+        }
+        return ok;
     }
 
     // --- Mask Alone Mode (Mac MaskAlone parity) ---
@@ -3717,86 +3008,16 @@ class CompositorEngine {
     snappedResize(layerId, handle, point, options = {}) {
         const layer = this.layers.find(l => l.id === layerId);
         if (!layer) return point;
-
-        const tolerance = options.tolerance || 5;
-        const lockRatio = !!options.lockRatio;
-        let sx = point.x, sy = point.y;
-
-        // Snap to document edges (0, width, height)
-        if (Math.abs(sx - 0) <= tolerance) sx = 0;
-        if (Math.abs(sx - this.width) <= tolerance) sx = this.width;
-        if (Math.abs(sy - 0) <= tolerance) sy = 0;
-        if (Math.abs(sy - this.height) <= tolerance) sy = this.height;
-
-        // Snap to other layers' edges
-        for (const other of this.layers) {
-            if (other.id === layerId || !other.visible) continue;
-            if (Math.abs(sx - other.x) <= tolerance) sx = other.x;
-            if (Math.abs(sx - (other.x + other.width)) <= tolerance) sx = other.x + other.width;
-            if (Math.abs(sy - other.y) <= tolerance) sy = other.y;
-            if (Math.abs(sy - (other.y + other.height)) <= tolerance) sy = other.y + other.height;
-        }
-
-        if (lockRatio && layer.width > 0 && layer.height > 0) {
-            const aspect = layer.width / layer.height;
-            const newW = sx - layer.x;
-            const newH = sy - layer.y;
-            if (Math.abs(newW) > Math.abs(newH * aspect)) {
-                sy = layer.y + newW / aspect;
-            } else {
-                sx = layer.x + newH * aspect;
-            }
-        }
-
-        return { x: sx, y: sy };
+        return moduleSnappedResize(layer, this.width, this.height, this.layers, handle, point, options);
     }
 
     // --- New Canvas Units & Presets (Mac NewCanvasUnit parity) ---
     static unitToPixels(value, unit = 'pixels', resolution = 72) {
-        const num = parseFloat(String(value).replace(',', '.'));
-        if (isNaN(num) || num <= 0) return null;
-
-        switch (unit.toLowerCase()) {
-            case 'inches':
-            case 'in':
-                const inPx = Math.round(num * resolution);
-                return inPx > 30000 ? null : inPx;
-            case 'millimeters':
-            case 'mm':
-                const mmPx = Math.round((num / 25.4) * resolution);
-                return mmPx > 30000 ? null : mmPx;
-            case 'centimeters':
-            case 'cm':
-                const cmPx = Math.round((num / 2.54) * resolution);
-                return cmPx > 30000 ? null : cmPx;
-            case 'pixels':
-            case 'px':
-            default:
-                if (String(value).includes('.') || String(value).includes(',')) return null; // pixels must be whole
-                return num > 30000 ? null : Math.round(num);
-        }
+        return moduleUnitToPixels(value, unit, resolution);
     }
 
     static pixelsToUnitText(pixels, unit = 'pixels', resolution = 72) {
-        const fmt = (val) => {
-            const str = val.toFixed(2);
-            return str.replace(/\.00$/, '').replace(/(\.[1-9])0$/, '$1');
-        };
-        switch (unit.toLowerCase()) {
-            case 'inches':
-            case 'in':
-                return fmt(pixels / resolution);
-            case 'millimeters':
-            case 'mm':
-                return fmt((pixels / resolution) * 25.4);
-            case 'centimeters':
-            case 'cm':
-                return fmt((pixels / resolution) * 2.54);
-            case 'pixels':
-            case 'px':
-            default:
-                return String(Math.round(pixels));
-        }
+        return modulePixelsToUnitText(pixels, unit, resolution);
     }
 
     // --- Export Pipeline ---
