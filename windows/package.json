@@ -10,6 +10,7 @@
   "scripts": {
     "test": "node --test",
     "parity": "node ../scripts/parity-audit.js",
+    "benchmark": "node ../scripts/benchmark-pipeline.js",
     "start": "electron src/main.js",
     "pack": "electron-builder --dir",
     "dist": "electron-builder --win --x64 --publish never"

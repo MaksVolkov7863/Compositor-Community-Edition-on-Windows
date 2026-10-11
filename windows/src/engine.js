@@ -3133,6 +3133,112 @@ class CompositorEngine {
         return layer;
     }
 
+    /**
+     * Select Subject (Mac Vision / SubjectRemoval parity)
+     * Detects foreground subject silhouette and sets it as the active selection mask.
+     */
+    async selectSubject(settings = {}) {
+        const layer = this.getActiveLayer();
+        if (!layer || !layer.canvas) return false;
+
+        const { VisionSegmentation, VisionFailure } = require('./vision-segmentation');
+        const ctx = layer.ctx || layer.canvas.getContext('2d');
+        const imgData = ctx.getImageData(0, 0, layer.width, layer.height);
+
+        const rawMask = VisionSegmentation.detectSubject(imgData, layer.width, layer.height, settings);
+        const refinedMask = VisionSegmentation.refineMatte(rawMask, imgData, layer.width, layer.height, settings);
+
+        // Map layer mask to document canvas selection coordinates
+        const docMask = new Uint8Array(this.width * this.height);
+        let minX = this.width, minY = this.height, maxX = 0, maxY = 0;
+        let count = 0;
+
+        for (let ly = 0; ly < layer.height; ly++) {
+            const dy = layer.y + ly;
+            if (dy < 0 || dy >= this.height) continue;
+            for (let lx = 0; lx < layer.width; lx++) {
+                const dx = layer.x + lx;
+                if (dx < 0 || dx >= this.width) continue;
+                const val = refinedMask[ly * layer.width + lx];
+                docMask[dy * this.width + dx] = val;
+                if (val > 128) {
+                    if (dx < minX) minX = dx;
+                    if (dx > maxX) maxX = dx;
+                    if (dy < minY) minY = dy;
+                    if (dy > maxY) maxY = dy;
+                    count++;
+                }
+            }
+        }
+
+        if (count === 0) {
+            throw new VisionFailure();
+        }
+
+        this.selection = {
+            type: 'subject',
+            mask: docMask,
+            width: this.width,
+            height: this.height,
+            bounds: {
+                x: minX,
+                y: minY,
+                width: maxX - minX + 1,
+                height: maxY - minY + 1
+            }
+        };
+
+        this.recordHistory('Select Subject');
+        this.render();
+        this.notifyUI();
+        return true;
+    }
+
+    /**
+     * Remove Background (Mac SubjectRemoval parity)
+     * Creates a non-destructive layer mask isolating the detected subject.
+     */
+    async removeBackground(settings = {}) {
+        const layer = this.getActiveLayer();
+        if (!layer || !layer.canvas) return false;
+
+        const { VisionSegmentation } = require('./vision-segmentation');
+        const ctx = layer.ctx || layer.canvas.getContext('2d');
+        const imgData = ctx.getImageData(0, 0, layer.width, layer.height);
+
+        const rawMask = VisionSegmentation.detectSubject(imgData, layer.width, layer.height, settings);
+        let refinedMask = VisionSegmentation.refineMatte(rawMask, imgData, layer.width, layer.height, settings);
+
+        if (layer.hasMask && layer.maskCanvas) {
+            refinedMask = VisionSegmentation.combineWithExisting(refinedMask, layer.maskCanvas, layer.width, layer.height);
+        }
+
+        // Apply as raster layer mask
+        const maskCanvas = this.createCanvas(layer.width, layer.height);
+        const maskCtx = maskCanvas.getContext('2d');
+        const maskImgData = maskCtx.createImageData(layer.width, layer.height);
+
+        for (let i = 0; i < refinedMask.length; i++) {
+            const alpha = refinedMask[i];
+            const idx = i * 4;
+            maskImgData.data[idx] = alpha;
+            maskImgData.data[idx + 1] = alpha;
+            maskImgData.data[idx + 2] = alpha;
+            maskImgData.data[idx + 3] = alpha;
+        }
+
+        maskCtx.putImageData(maskImgData, 0, 0);
+        layer.maskCanvas = maskCanvas;
+        layer.maskCtx = maskCtx;
+        layer.hasMask = true;
+        layer.maskEnabled = true;
+
+        this.recordHistory('Remove Background');
+        this.render();
+        this.notifyUI();
+        return true;
+    }
+
     // --- Selection Clipboard & Feathering ---
 
     copySelection() {
