@@ -176,6 +176,7 @@ struct EffectsSheet: View {
         }
         return HStack(spacing: 10) {
             Text(title).frame(width: 64, alignment: .leading)
+                .scrubbable(sensitivity: 1, value: value, range: limits)
             // A manually entered larger value stays intact; only the thumb is pinned
             // to the end of the slider until the user drags it again.
             Slider(value: Binding(get: { min(range.upperBound, max(range.lowerBound, value.wrappedValue)) },

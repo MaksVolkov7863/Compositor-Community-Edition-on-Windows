@@ -25,9 +25,19 @@ nonisolated enum PSDDocumentBuilder {
         var layers: [ImageLayer] = []
         let canvas = CGSize(width: document.width, height: document.height)
         for record in document.layers {
+            if record.croppedToCanvas {
+                conversions.append(PSDConversion(layerName: record.name,
+                                                 message: "Cropped to the canvas so the file fits in memory. Pixels outside the canvas weren't imported."))
+            }
+            let renderedText = record.text.flatMap { try? PSDText.render($0) }
             var notes: [String] = []
             if record.kind == .text {
-                notes.append("Editable Photoshop text becomes pixels and can’t be retyped.")
+                if let source = record.text, renderedText != nil {
+                    notes.append(contentsOf: source.notes)
+                    if let missing = PSDText.missingFontNote(source.style.fontName) { notes.append(missing) }
+                } else {
+                    notes.append(PSDText.rasterizedNote)
+                }
             }
             if record.kind == .smartObject {
                 notes.append("The smart object was rasterized. Linked contents can’t be edited.")
@@ -75,6 +85,13 @@ nonisolated enum PSDDocumentBuilder {
                                    transform: LayerTransform(origin: .zero, size: canvas), parentID: record.parentID,
                                    opacity: min(1, max(0, record.opacity)),
                                    blendMode: record.blendMode ?? .normal, adjustment: adjustment)
+            } else if let rendered = renderedText, let source = record.text {
+                let asset = try imported(rendered.image, name: record.name)
+                layer = ImageLayer(id: record.id, asset: asset, name: record.name, isVisible: record.isVisible,
+                                   transform: rendered.transform, parentID: record.parentID,
+                                   opacity: min(1, max(0, record.opacity)),
+                                   blendMode: record.blendMode ?? .normal,
+                                   text: LayerText(style: source.style, image: rendered.image))
             } else if let image = record.image {
                 let asset = try assets[record.id] ?? imported(image, name: record.name)
                 let origin = CGPoint(x: record.bounds.minX, y: record.bounds.minY)
@@ -92,7 +109,8 @@ nonisolated enum PSDDocumentBuilder {
                                    opacity: min(1, max(0, record.opacity)),
                                    blendMode: record.blendMode ?? .normal)
             }
-            if let maskImage = record.mask, let maskAsset = try? LayerMask.asset(from: maskImage) {
+            if let maskImage = record.mask.flatMap({ Self.maskOnLayerGrid($0, record: record, layer: layer, canvas: canvas) }),
+               let maskAsset = try? LayerMask.asset(from: maskImage) {
                 layer.mask = LayerMask(asset: maskAsset, isEnabled: record.maskEnabled, isLinked: record.maskLinked)
             } else if record.mask != nil {
                 conversions.append(PSDConversion(layerName: record.name, message: "The layer mask couldn’t be converted to 8-bit grayscale and was skipped."))
@@ -123,5 +141,31 @@ nonisolated enum PSDDocumentBuilder {
 
     private static func imported(_ image: CGImage, name: String) throws -> ImportedImage {
         ImportedImage(image: image, thumbnail: try PixelAdjust.thumbnail(of: image), name: name)
+    }
+}
+
+extension PSDDocumentBuilder {
+    /// A PSD layer mask on the layer's own pixel grid, as Compositor's masks are: the stored patch drawn where it sits
+    /// on the document, and Photoshop's default value everywhere else. The patch alone, stretched over the layer, would
+    /// put the mask in the wrong place. Adjustment layers and folders cover the canvas.
+    nonisolated static func maskOnLayerGrid(_ patch: CGImage, record: PSDRecord, layer: ImageLayer, canvas: CGSize) -> CGImage? {
+        let grid = layer.asset.map { CGSize(width: $0.image.width, height: $0.image.height) } ?? canvas
+        let placed = CGRect(origin: layer.transform.origin, size: layer.transform.size)
+        guard grid.width >= 1, grid.height >= 1, placed.width > 0, placed.height > 0,
+              record.maskBounds.width > 0, record.maskBounds.height > 0 else { return patch }
+        let scaleX = grid.width / placed.width, scaleY = grid.height / placed.height
+        let rect = CGRect(x: (record.maskBounds.minX - placed.minX) * scaleX, y: (record.maskBounds.minY - placed.minY) * scaleY,
+                          width: record.maskBounds.width * scaleX, height: record.maskBounds.height * scaleY)
+        // Already the layer's grid: nothing to place.
+        if rect.integral == CGRect(origin: .zero, size: grid), patch.width == Int(grid.width), patch.height == Int(grid.height) { return patch }
+        let width = Int(grid.width), height = Int(grid.height)
+        guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width,
+                                      space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue) else { return nil }
+        context.setFillColor(gray: CGFloat(record.maskDefault) / 255, alpha: 1)
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        context.interpolationQuality = .none
+        // Top-left document rows, bottom-up context rows.
+        context.draw(patch, in: CGRect(x: rect.minX, y: CGFloat(height) - rect.maxY, width: rect.width, height: rect.height))
+        return context.makeImage()
     }
 }

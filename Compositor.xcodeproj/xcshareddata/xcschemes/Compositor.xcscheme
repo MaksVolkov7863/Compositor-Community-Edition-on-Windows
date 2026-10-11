@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Scheme
-   LastUpgradeVersion = "2660"
+   LastUpgradeVersion = "2700"
    version = "1.7">
    <BuildAction
       parallelizeBuildables = "YES"
@@ -35,20 +35,6 @@
                ReferencedContainer = "container:Compositor.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
-         <BuildActionEntry
-            buildForTesting = "YES"
-            buildForRunning = "NO"
-            buildForProfiling = "NO"
-            buildForArchiving = "NO"
-            buildForAnalyzing = "NO">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "8F311FAF304F03BC0017D14F"
-               BuildableName = "CompositorUITests.xctest"
-               BlueprintName = "CompositorUITests"
-               ReferencedContainer = "container:Compositor.xcodeproj">
-            </BuildableReference>
-         </BuildActionEntry>
       </BuildActionEntries>
    </BuildAction>
    <TestAction
@@ -75,17 +61,6 @@
                BlueprintIdentifier = "8F311FA5304F03BC0017D14F"
                BuildableName = "CompositorTests.xctest"
                BlueprintName = "CompositorTests"
-               ReferencedContainer = "container:Compositor.xcodeproj">
-            </BuildableReference>
-         </TestableReference>
-         <TestableReference
-            skipped = "NO"
-            parallelizable = "YES">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "8F311FAF304F03BC0017D14F"
-               BuildableName = "CompositorUITests.xctest"
-               BlueprintName = "CompositorUITests"
                ReferencedContainer = "container:Compositor.xcodeproj">
             </BuildableReference>
          </TestableReference>

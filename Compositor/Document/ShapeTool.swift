@@ -65,7 +65,7 @@ struct ShapeDraft: Equatable {
 
 extension EditorSession {
     /// Pixels one shape layer may hold, the same budget as an import.
-    nonisolated static let maxShapePixels = 100_000_000
+    nonisolated static let maxShapePixels = DocumentLimits.maxSurfacePixels
 
     func beginShape(at point: CGPoint) {
         guard tool == .shape, canEditLayers, point.x.isFinite, point.y.isFinite else { return }
@@ -128,7 +128,7 @@ extension EditorSession {
         }
         guard canEditLayers, document != nil, rect.width >= 1, rect.height >= 1 else { return }
         guard Int(rect.width) * Int(rect.height) <= Self.maxShapePixels else {
-            brushError = "That shape is too large. A shape can cover up to 100 megapixels."
+            brushError = "That shape is too large. A shape can cover up to \(DocumentLimits.maxSurfaceMegapixels) megapixels."
             return
         }
         do {

@@ -3,8 +3,9 @@ import Metal
 
 /// Layer effects on the GPU: the outline's reach and the shadow's blur are the two heavy passes, and both are
 /// separable, so each runs as a row pass and a column pass over the same pixels. Falls back to the CPU renderer
-/// when Metal isn't available (see `LayerEffectsRenderer`).
-final class MetalLayerEffects {
+/// when Metal isn't available (see `LayerEffectsRenderer`). Export renders on a worker, so it holds only Metal objects,
+/// which are safe to use from any thread.
+nonisolated final class MetalLayerEffects: Sendable {
     static let shared: MetalLayerEffects? = try? MetalLayerEffects()
     private let device: MTLDevice
     private let queue: MTLCommandQueue
@@ -329,11 +330,12 @@ final class MetalLayerEffects {
                                uint2 gid [[thread_position_in_grid]]) {
         if (gid.x >= size.width || gid.y >= size.height) { return; }
         uint index = gid.y * size.width + gid.x;
-        result[index] = clamp(shape[index] * (1.0 - moved[index]), 0.0, 1.0);
+        // How strongly an inner effect falls here, before the layer's own alpha: compose recolors the pixels by it.
+        result[index] = clamp(1.0 - moved[index], 0.0, 1.0);
     }
 
-    // Shadow behind, outer glow over it, outside stroke over that, the layer's pixels over that, then a color overlay,
-    // an inner glow, an inner shadow and an inside stroke on top.
+    // Shadow behind, outer glow over it, outside stroke over that, the layer's pixels (recolored by a color overlay, an
+    // inner glow and an inner shadow) over that, then an inside stroke on top.
     kernel void effects_compose(device const uchar4* pixels [[buffer(0)]],
                                 device const float* ring [[buffer(1)]],
                                 device const float* shadow [[buffer(2)]],
@@ -364,23 +366,24 @@ final class MetalLayerEffects {
             alpha = strokeCoverage + alpha * (1.0 - strokeCoverage);
         }
         float4 source = float4(pixels[index]) / 255.0;
-        color = source.xyz + color * (1.0 - source.w);
-        alpha = source.w + alpha * (1.0 - source.w);
+        // A color overlay recolors the layer's own pixels and keeps their alpha, so a half-transparent black pixel
+        // under a white overlay turns half-transparent white. Laid over the composite instead, it only covered
+        // as much as the pixel did and let the old color show through.
         if (settings.more.x == 1) {
-            float coverage = clamp(shape[index] * settings.overlayColor.w, 0.0, 1.0);
-            color = settings.overlayColor.xyz * coverage + color * (1.0 - coverage);
-            alpha = coverage + alpha * (1.0 - coverage);
+            source.xyz = mix(source.xyz, settings.overlayColor.xyz * source.w, settings.overlayColor.w);
         }
+        // An inner glow and an inner shadow recolor the pixels the same way, as Photoshop's do. Laid over the
+        // composite, they took only part of a translucent pixel, made it more opaque, and tinted the effects beneath.
         if (settings.more.z == 1) {
-            float coverage = clamp(innerGlow[index] * settings.innerGlowColor.w, 0.0, 1.0);
-            color = settings.innerGlowColor.xyz * coverage + color * (1.0 - coverage);
-            alpha = coverage + alpha * (1.0 - coverage);
+            float amount = clamp(innerGlow[index] * settings.innerGlowColor.w, 0.0, 1.0);
+            source.xyz = mix(source.xyz, settings.innerGlowColor.xyz * source.w, amount);
         }
         if (settings.flags.w == 1) {
-            float coverage = clamp(inner[index] * settings.innerColor.w, 0.0, 1.0);
-            color = settings.innerColor.xyz * coverage + color * (1.0 - coverage);
-            alpha = coverage + alpha * (1.0 - coverage);
+            float amount = clamp(inner[index] * settings.innerColor.w, 0.0, 1.0);
+            source.xyz = mix(source.xyz, settings.innerColor.xyz * source.w, amount);
         }
+        color = source.xyz + color * (1.0 - source.w);
+        alpha = source.w + alpha * (1.0 - source.w);
         if (settings.flags.x == 1 && settings.flags.y == 1) {
             color = settings.strokeColor.xyz * strokeCoverage + color * (1.0 - strokeCoverage);
             alpha = strokeCoverage + alpha * (1.0 - strokeCoverage);

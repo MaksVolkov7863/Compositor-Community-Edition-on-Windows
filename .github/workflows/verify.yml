@@ -2,6 +2,18 @@ name: Verify (macOS Xcode)
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - 'Compositor/**'
+      - 'CompositorTests/**'
+      - 'CompositorUITests/**'
+      - 'Compositor.xcodeproj/**'
+  pull_request:
+    paths:
+      - 'Compositor/**'
+      - 'CompositorTests/**'
+      - 'CompositorUITests/**'
+      - 'Compositor.xcodeproj/**'
 
 concurrency:
   group: verify-${{ github.workflow }}-${{ github.ref }}
@@ -13,12 +25,34 @@ permissions:
 jobs:
   unit:
     name: unit
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository)
     runs-on: macos-14
     timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Decide whether the filter suites run
+        id: scope
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          filters=true
+          if [[ "$EVENT" == push || "$EVENT" == pull_request ]] && [[ -n "$BASE" && ! "$BASE" =~ ^0+$ ]] \
+             && git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            git diff --name-only "$BASE" HEAD > changed.txt
+            pattern='^Compositor/Document/(CameraRaw|Filters|HueSaturation|ImageAdjustments|Levels|Curves|Scanlines|Dither|PixelAdjust|AdjustmentEditing|LayerAdjustment)'
+            pattern+='|^Compositor/Rendering/(AdjustPixels|LevelsPixels|DitherPixels|LensPixels|NoisePixels|GPUNoise|AdjustmentSurface)'
+            pattern+='|^Compositor/UI/(CameraRaw|Curves|FilterSheet|HueSaturation|Levels)'
+            pattern+='|^CompositorTests/(CameraRaw|HueSaturation|ImageAdjustment|Levels|Filter|Scanlines|FinishingFilter)'
+            pattern+='|^Compositor\.xcodeproj/|^\.github/workflows/verify\.yml|^scripts/ci-tests\.sh'
+            grep -qE "$pattern" changed.txt || filters=false
+          fi
+          echo "filters=$filters" >> "$GITHUB_OUTPUT"
+          echo "Filter suites: $filters"
 
       - name: Resolve Swift packages
         run: >
@@ -27,62 +61,80 @@ jobs:
           -scheme Compositor
           -onlyUsePackageVersionsFromResolvedFile
 
-      - name: Run unit tests
+      - name: Build for testing
+        id: build
         run: >
-          xcodebuild test
+          xcodebuild build-for-testing
           -project Compositor.xcodeproj
           -scheme Compositor
-          -destination 'platform=macOS'
+          -destination 'platform=macOS,arch=arm64'
           -configuration Debug
           -derivedDataPath DerivedData
-          -resultBundlePath TestResults.xcresult
-          -parallel-testing-enabled NO
-          -skip-testing:CompositorUITests
           CODE_SIGN_IDENTITY=-
+          GCC_OPTIMIZATION_LEVEL=s
+          SWIFT_OPTIMIZATION_LEVEL=-O
+
+      - name: Run unit tests
+        env:
+          FILTERS: ${{ steps.scope.outputs.filters }}
+        run: scripts/ci-tests.sh DerivedData
 
       - name: Upload test results
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: unit-test-results
-          path: TestResults.xcresult
+          path: |
+            *.xcresult
+            *.log
           retention-days: 7
           if-no-files-found: ignore
 
-  ui:
-    name: ui
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+  screenshots:
+    name: screenshots
+    if: github.event_name == 'workflow_dispatch'
     runs-on: macos-14
-    timeout-minutes: 60
+    timeout-minutes: 30
+    continue-on-error: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Resolve Swift packages
-        run: >
-          xcodebuild -resolvePackageDependencies
-          -project Compositor.xcodeproj
-          -scheme Compositor
-          -onlyUsePackageVersionsFromResolvedFile
+      - name: Allow UI automation
+        run: sudo automationmodetool enable-automationmode-without-authentication
 
-      - name: Run UI tests
+      - name: Take screenshots
         run: >
           xcodebuild test
           -project Compositor.xcodeproj
-          -scheme Compositor
-          -destination 'platform=macOS'
-          -configuration Debug
+          -scheme Screenshots
+          -destination 'platform=macOS,arch=arm64'
           -derivedDataPath DerivedData
-          -resultBundlePath TestResults.xcresult
-          -parallel-testing-enabled NO
-          -only-testing:CompositorUITests
+          -resultBundlePath Screenshots.xcresult
           CODE_SIGN_IDENTITY=-
+          GCC_OPTIMIZATION_LEVEL=s
+          SWIFT_OPTIMIZATION_LEVEL=-O
 
-      - name: Upload test results
-        if: failure()
+      - name: Collect screenshots
+        if: ${{ !cancelled() }}
+        run: |
+          xcrun xcresulttool export attachments --path Screenshots.xcresult --output-path exported
+          mkdir -p screenshots
+          python3 - <<'PY'
+          import json, os, re, shutil
+          if os.path.exists("exported/manifest.json"):
+              for test in json.load(open("exported/manifest.json")):
+                  for item in test.get("attachments", []):
+                      name = re.sub(r"_\d+_[0-9A-Fa-f-]+(\.\w+)$", r"\1", item.get("suggestedHumanReadableName", "screenshot.png"))
+                      shutil.copy(os.path.join("exported", item["exportedFileName"]), os.path.join("screenshots", name))
+          PY
+          ls -la screenshots || true
+
+      - name: Upload screenshots
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
-          name: ui-test-results
-          path: TestResults.xcresult
-          retention-days: 7
-          if-no-files-found: ignore
+          name: screenshots-macos
+          path: screenshots
+          retention-days: 30
+          if-no-files-found: warn

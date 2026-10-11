@@ -95,7 +95,7 @@ nonisolated struct CameraRawOpticsSettings: Equatable, Sendable {
     }
 }
 
-extension CameraRawSettings {
+nonisolated extension CameraRawSettings {
     func applyDetailOptics(pixels: UnsafeMutablePointer<UInt8>, width: Int, height: Int, stride: Int, scale: Double,
                            profileStrength: Double, sharpenMask: Bool) {
         let detail = detail.normalized
@@ -113,7 +113,8 @@ extension CameraRawSettings {
                                      optics.distortionK(profileStrength: profileStrength),
                                      optics.purpleAmount, optics.purpleHueLow, optics.purpleHueHigh,
                                      optics.greenAmount, optics.greenHueLow, optics.greenHueHigh,
-                                     optics.vignetteAmount, optics.vignetteMidpoint, scale)
+                                     optics.vignetteAmount, optics.vignetteMidpoint, scale,
+                                     CameraRawTables.exposureTables, Int32(CameraRawTables.size))
         }
         if detail.adjusts {
             adjust_camera_raw_detail(pixels, width, height, stride,

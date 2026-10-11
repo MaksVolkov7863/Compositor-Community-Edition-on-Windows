@@ -45,20 +45,42 @@ nonisolated struct CameraRawCurveSettings: Equatable, Sendable {
         points.count == 2 && points[0].x == 0 && points[0].y == 0 && points[1].x == 1 && points[1].y == 1
     }
 
-    /// Lifts or lowers the region a tone belongs to. Dividers are fractions of the tonal range.
+    /// Camera Raw's parametric curve, matched to Photoshop's: Darks bends the whole range below the middle divider and
+    /// Lights the whole range above it, Shadows and Highlights just the ranges past the outer dividers. Each bend is a
+    /// gamma curve across its range, which keeps the curve rising however far the sliders go, and the result is run
+    /// through the same smooth curve as Image › Curves so the halves meet without a corner. Dividers are percentages.
     func parametric(_ tone: Double) -> Double {
-        let shadow = shadowSplit / 100, dark = darkSplit / 100, light = lightSplit / 100
-        let (amount, lo, hi): (Double, Double, Double)
-        if tone < shadow { (amount, lo, hi) = (shadows, 0, shadow) }
-        else if tone < dark { (amount, lo, hi) = (darks, shadow, dark) }
-        else if tone < light { (amount, lo, hi) = (lights, dark, light) }
-        else { (amount, lo, hi) = (highlights, light, 1) }
-        let span = max(0.02, hi - lo)
-        let weight = 1 - abs(tone - (lo + hi) / 2) / (span / 2)
-        return min(1, max(0, tone + (amount / 100) * max(0, weight) * 0.22))
+        guard shadows != 0 || darks != 0 || lights != 0 || highlights != 0 else { return tone }
+        let anchors = (0...32).map { index -> CurvePoint in
+            let x = Double(index) / 32
+            return CurvePoint(x: x, y: Self.bend(Self.bend(x, lower: shadowSplit / 100, shadows, upper: lightSplit / 100, highlights),
+                                                 lower: darkSplit / 100, darks, upper: darkSplit / 100, lights))
+        }
+        return point(tone, anchors)
     }
 
-    func lumaTable() -> [Float] { (0...255).map { Float(point(parametric(Double($0) / 255), rgb)) } }
+    /// Bends the tones below `lower` by `low` and above `upper` by `high` (−100…100), leaving black, white and the
+    /// dividers in place. Fitted to Photoshop: Darks −51 dips the curve about 0.1 at a quarter of the way up.
+    private static func bend(_ tone: Double, lower: Double, _ low: Double, upper: Double, _ high: Double) -> Double {
+        let strength = 1.66
+        if tone < lower, lower > 0 {
+            return lower * pow(tone / lower, pow(2, -low / 100 * strength))
+        }
+        if tone > upper, upper < 1 {
+            let rest = 1 - upper
+            return 1 - rest * pow((1 - tone) / rest, pow(2, high / 100 * strength))
+        }
+        return tone
+    }
+
+    /// Whether Photoshop's measured tables draw the parametric curve, leaving the curve pass the point curve alone:
+    /// while the dividers are where they were measured, 25, 50 and 75, and Refine Saturation (which the curve pass
+    /// works into the whole curve) is at zero.
+    var hasMeasuredDividers: Bool { shadowSplit == 25 && darkSplit == 50 && lightSplit == 75 && refineSaturation == 0 }
+
+    func toneTable() -> [Float] {
+        (0...255).map { Float(point(hasMeasuredDividers ? Double($0) / 255 : parametric(Double($0) / 255), rgb)) }
+    }
     func channelTable(_ points: [CurvePoint]) -> [Float] { (0...255).map { Float(point(Double($0) / 255, points)) } }
 
     func nudged(_ channel: CameraRawPointChannel, near tone: Double, by delta: Double) -> Self {
@@ -246,20 +268,42 @@ nonisolated struct CameraRawGradeWheel: Equatable, Sendable {
     }
 }
 
-extension CameraRawSettings {
+nonisolated extension CameraRawSettings {
+    /// Curve, Color Mixer and Color Grading run over a composed table (or no change, when there's none yet), so they
+    /// cost a pixel nothing more than the lookup it makes already.
+    func foldingColor(into composed: [Float]?) -> [Float]? {
+        guard var table = composed ?? CameraRawTables.identity() else { return composed }
+        let curve = curve.normalized
+        if curve.adjusts {
+            let tone = curve.toneTable(), red = curve.channelTable(curve.red), green = curve.channelTable(curve.green)
+            let blue = curve.channelTable(curve.blue)
+            camera_raw_table_curves(&table, Int32(CameraRawTables.grid), tone, red, green, blue)
+        }
+        let stages = CameraRawTables.mixerStages(for: mixer.normalized) + CameraRawTables.gradingStages(for: grading.normalized)
+        stages.withUnsafeBufferPointer {
+            camera_raw_compose_onto(&table, Int32(CameraRawTables.grid), $0.baseAddress, Int32($0.count), Int32(CameraRawTables.size))
+        }
+        return table
+    }
+
     /// Runs Curve, then Color Mixer, then Color Grading. `visualize` dims pixels outside that point color.
     func applyCurveColor(_ pixels: UnsafeMutablePointer<UInt8>, width: Int, height: Int, stride: Int, visualize: Int) {
         let curve = curve.normalized
         let mixer = mixer.normalized
         let grading = grading.normalized
-        let luma = curve.lumaTable()
+        let tone = curve.toneTable()
         let red = curve.channelTable(curve.red)
         let green = curve.channelTable(curve.green)
         let blue = curve.channelTable(curve.blue)
-        let mixerFloats = mixer.mixerFloats
+        // The eight colors' sliders come from Photoshop's measured tables; the formula's are left at zero, for the
+        // point colors alone.
+        let mixerFloats = [Float](repeating: 0, count: 24)
+        let mixerTable = CameraRawTables.compose(CameraRawTables.mixerStages(for: mixer))
         let pointFloats = mixer.pointFloats
-        let grade = grading.gradeFloats
-        luma.withUnsafeBufferPointer { lumaP in
+        // Color Grading comes whole from Photoshop's measured tables; the formula's wheels are left at zero.
+        let gradeTable = CameraRawTables.compose(CameraRawTables.gradingStages(for: grading))
+        let grade = [Float](repeating: 0, count: 12)
+        tone.withUnsafeBufferPointer { toneP in
             red.withUnsafeBufferPointer { redP in
                 green.withUnsafeBufferPointer { greenP in
                     blue.withUnsafeBufferPointer { blueP in
@@ -267,10 +311,11 @@ extension CameraRawSettings {
                             pointFloats.withUnsafeBufferPointer { pointP in
                                 grade.withUnsafeBufferPointer { gradeP in
                                     adjust_camera_raw_curve_color(pixels, width, height, stride,
-                                                                  lumaP.baseAddress, redP.baseAddress, greenP.baseAddress, blueP.baseAddress,
+                                                                  toneP.baseAddress, redP.baseAddress, greenP.baseAddress, blueP.baseAddress,
                                                                   curve.refineSaturation / 100, mixerP.baseAddress,
                                                                   Int32(mixer.points.count), pointP.baseAddress,
-                                                                  gradeP.baseAddress, grading.blending / 100, grading.balance / 100, Int32(visualize))
+                                                                  gradeP.baseAddress, grading.blending / 100, grading.balance / 100, Int32(visualize),
+                                                                  mixerTable, gradeTable, Int32(CameraRawTables.grid))
                                 }
                             }
                         }

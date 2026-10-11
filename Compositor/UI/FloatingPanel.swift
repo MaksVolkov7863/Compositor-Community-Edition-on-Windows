@@ -120,30 +120,38 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
         if placement != .dockedToMainWindowRight { remember(panel) }
     }
 
+    /// Camera Raw's three grading wheels are the widest thing a docked panel holds; their own
+    /// sliders are narrowed to fit this rather than the panel being widened to fit them.
+    static let dockedWidth: CGFloat = 440
+
     private func applyDockedFrame(panel: NSPanel) {
         guard let window = dockedWindow ?? documentWindow() else {
             panel.center()
             return
         }
-        let width: CGFloat = 440
+        let width = Self.dockedWidth
         let frame = window.frame
         let panelFrame = NSRect(x: frame.maxX - width, y: frame.minY, width: width, height: frame.height)
         panel.setFrame(panelFrame, display: true)
     }
 
-    /// The document window, never the panel itself. A docked panel is key while it is open.
+    /// The document window, never the panel itself. A docked panel is key while it is open, and
+    /// neither main nor key is set while the app is in the background — so fall back to the
+    /// frontmost ordinary window rather than centering the panel somewhere unrelated.
     private func documentWindow() -> NSWindow? {
-        let candidate = NSApp.mainWindow ?? NSApp.keyWindow
-        return candidate === panel ? nil : candidate
+        if let candidate = NSApp.mainWindow ?? NSApp.keyWindow, candidate !== panel { return candidate }
+        return NSApp.windows.first { $0 !== panel && $0.isVisible && !($0 is NSPanel) }
     }
 
     private func installFrameObserver(for panel: NSPanel) {
         removeFrameObserver()
         guard let window = documentWindow() else { return }
         dockedWindow = window
-        let follow = { [weak self] (_: Notification) in
-            guard let self, let panel = self.panel, panel.isVisible, self.placement == .dockedToMainWindowRight else { return }
-            self.applyDockedFrame(panel: panel)
+        let follow: @Sendable (Notification) -> Void = { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, let panel = self.panel, panel.isVisible, self.placement == .dockedToMainWindowRight else { return }
+                self.applyDockedFrame(panel: panel)
+            }
         }
         for name in [NSWindow.didResizeNotification, NSWindow.didMoveNotification] {
             frameObservers.append(NotificationCenter.default.addObserver(forName: name, object: window, queue: .main, using: follow))

@@ -1,11 +1,11 @@
 import AppKit
 import SwiftUI
 
-/// Camera Raw Filter's adjustment column: the histogram, then Light, Color, Effects, Curve, Color Mixer,
-/// Color Grading, Detail, Optics, Geometry, and Calibration.
+/// Camera Raw Filter's adjustment column: the histogram, then Light, Color, Color Grading, Effects, Curve,
+/// Color Mixer, Detail, Optics, Geometry, and Calibration.
 struct CameraRawControls: View {
     @Bindable var session: EditorSession
-    @State private var expanded: Set<Section> = [.light, .color]
+    @State private var expanded: Set<Section> = [.light, .color, .colorGrading]
     @State private var optionMonitor: Any?
 
     private var settings: FilterSettings { session.filterEdit?.settings ?? FilterSettings() }
@@ -301,6 +301,9 @@ struct CameraRawControls: View {
                 .frame(minWidth: Self.labelWidth, alignment: .leading)
                 .help(help)
                 .onTapGesture(count: 2) { reset(key, to: resetValue) }
+                .scrubbable(sensitivity: 1 / step,
+                            value: Binding(get: { raw[keyPath: key] }, set: { assign(key, $0, clipping: nil) }),
+                            range: range)
             CameraRawSlider(value: raw[keyPath: key], range: range, track: track, help: help,
                             onChange: { rawValue in assign(key, (rawValue * step).rounded() / step, clipping: clipping) },
                             onReset: { reset(key, to: resetValue) })
@@ -370,10 +373,10 @@ struct CameraRawControls: View {
     private enum Section: String, CaseIterable, Identifiable {
         case light = "Light"
         case color = "Color"
+        case colorGrading = "Color Grading"
         case effects = "Effects"
         case curve = "Curve"
         case colorMixer = "Color Mixer"
-        case colorGrading = "Color Grading"
         case detail = "Detail"
         case optics = "Optics"
         case geometry = "Geometry"

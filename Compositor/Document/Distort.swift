@@ -74,7 +74,7 @@ nonisolated enum DistortWarp {
 
     /// Where each corner of the image's own pixels lands: a flipped layer shows its pixels
     /// mirrored, so they go to the opposite corners of the shape.
-    private static func imageCorners(_ corners: [CGPoint], flipX: Bool, flipY: Bool)
+    static func imageCorners(_ corners: [CGPoint], flipX: Bool, flipY: Bool)
         -> (topLeft: CGPoint, topRight: CGPoint, bottomRight: CGPoint, bottomLeft: CGPoint) {
         func corner(_ x: Int, _ y: Int) -> CGPoint {
             let u = flipX ? 1 - x : x, v = flipY ? 1 - y : y
@@ -92,8 +92,8 @@ nonisolated enum DistortWarp {
         let xs = corners.map(\.x), ys = corners.map(\.y)
         let minX = floor(xs.min()!), minY = floor(ys.min()!)
         let bounds = CGRect(x: minX, y: minY, width: ceil(xs.max()!) - minX, height: ceil(ys.max()!) - minY)
-        guard bounds.width >= 1, bounds.height >= 1, bounds.width <= 30_000, bounds.height <= 30_000,
-              bounds.width * bounds.height <= 100_000_000 else { throw ProjectError.tooLarge }
+        guard bounds.width >= 1, bounds.height >= 1, bounds.width <= DocumentLimits.maxSideExtent, bounds.height <= DocumentLimits.maxSideExtent,
+              bounds.width * bounds.height <= DocumentLimits.maxSurfaceExtent else { throw ProjectError.tooLarge }
         let placed = LayerTransform(origin: bounds.origin, size: bounds.size, sampling: transform.sampling)
         // A uniform 1 × 1 mask already covers any shape.
         if isMask, image.width == 1, image.height == 1 { return (image, placed) }
@@ -271,6 +271,12 @@ extension EditorSession {
 
     /// Where a distortion takes `layer`: its transform under the edit and the corners that transform moves to —
     /// for a group, each layer by the same perspective as the box.
+    /// The box and corners a distortion in progress is taking `layer` to, when it's taking it anywhere.
+    func distortShape(for layer: ImageLayer) -> (transform: LayerTransform, corners: [CGPoint])? {
+        guard let edit = transformEdit, !edit.mask, let shape = edit.corners else { return nil }
+        return distortTarget(for: layer, edit: edit, shape: shape)
+    }
+
     private func distortTarget(for layer: ImageLayer, edit: TransformEdit, shape: [CGPoint]) -> (transform: LayerTransform, corners: [CGPoint])? {
         guard let group = edit.group else { return edit.layerID == layer.id ? (edit.draft, shape) : nil }
         guard let original = group.originals[layer.id] else { return nil }

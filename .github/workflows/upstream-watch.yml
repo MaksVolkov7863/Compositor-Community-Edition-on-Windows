@@ -53,7 +53,7 @@ jobs:
       - name: Check Original macOS Upstream Repository
         id: upstream_check
         run: |
-          git remote add upstream https://github.com/mdejong/Compositor.git 2>/dev/null || true
+          git remote add upstream https://github.com/robbietilton/Compositor.git 2>/dev/null || git remote set-url upstream https://github.com/robbietilton/Compositor.git || true
           git fetch upstream main --quiet 2>/dev/null || git fetch upstream master --quiet 2>/dev/null || true
           
           UPSTREAM_REF=$(git rev-parse -q --verify upstream/main || git rev-parse -q --verify upstream/master || echo "")

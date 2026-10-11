@@ -97,7 +97,8 @@ extension EditorSession {
             guard let index = document?.layers.firstIndex(where: { $0.id == source.id }) else { throw ProjectError.invalid }
             document?.layers[index] = ImageLayer(id: source.id, asset: merged.asset, name: source.name, isVisible: source.isVisible,
                 transform: merged.transform, parentID: source.parentID, isGroup: false,
-                opacity: source.opacity, blendMode: source.blendMode, mask: merged.mask, maskSourceID: source.maskSourceID)
+                opacity: source.opacity, blendMode: source.blendMode, mask: merged.mask, maskSourceID: source.maskSourceID,
+                effects: source.effects)
             document?.selection = moved
             activeLayerID = source.id
         } catch {
@@ -128,7 +129,7 @@ nonisolated enum FloatingMerge {
             .applying(BrushRaster.pixelToDocument(transform, width: pixels.width, height: pixels.height)).applying(toPixels)
         let original = CGRect(x: 0, y: 0, width: width, height: height)
         let extent = original.union(floatingBounds).integral
-        guard extent.width <= 30_000, extent.height <= 30_000, extent.width * extent.height <= 100_000_000
+        guard extent.width <= DocumentLimits.maxSideExtent, extent.height <= DocumentLimits.maxSideExtent, extent.width * extent.height <= DocumentLimits.maxSurfaceExtent
         else { throw ProjectError.tooLarge }
         let context = try BrushRaster.context(width: Int(extent.width), height: Int(extent.height), mask: false)
         let placed = original.offsetBy(dx: -extent.minX, dy: -extent.minY)

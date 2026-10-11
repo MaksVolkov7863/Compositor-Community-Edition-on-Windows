@@ -67,6 +67,9 @@ struct CameraRawGeometryControls: View {
         let value = raw.geometry[keyPath: key]
         return HStack(spacing: 10) {
             Text(title).frame(minWidth: CameraRawControls.labelWidth, alignment: .leading).help(help)
+                .scrubbable(sensitivity: 1,
+                            value: Binding(get: { raw.geometry[keyPath: key] },
+                                           set: { newValue in update { $0.cameraRaw.geometry[keyPath: key] = newValue } }), range: range)
             CameraRawSlider(value: value, range: range, track: .plain, help: help,
                             onChange: { rawValue in update { $0.cameraRaw.geometry[keyPath: key] = rawValue.rounded() } },
                             onReset: { update { $0.cameraRaw.geometry[keyPath: key] = 0 } })
@@ -122,6 +125,10 @@ struct CameraRawCalibrationControls: View {
         let value = raw.calibration[keyPath: key]
         return HStack(spacing: 10) {
             Text(title).frame(minWidth: CameraRawControls.labelWidth, alignment: .leading).help(help)
+                .scrubbable(sensitivity: 1,
+                            value: Binding(get: { raw.calibration[keyPath: key] },
+                                           set: { newValue in update { $0.cameraRaw.calibration[keyPath: key] = newValue } }),
+                            range: CameraRawCalibrationSettings.toneRange)
             CameraRawSlider(value: value, range: CameraRawCalibrationSettings.toneRange, track: .plain, help: help,
                             onChange: { rawValue in update { $0.cameraRaw.calibration[keyPath: key] = rawValue.rounded() } },
                             onReset: { update { $0.cameraRaw.calibration[keyPath: key] = 0 } })

@@ -12,7 +12,7 @@ actor ImageResizer {
     static let shared = ImageResizer()
 
     func resize(_ snapshot: ProjectSnapshot, to options: ImageSizeOptions) throws -> ProjectSnapshot {
-        guard (1...30_000).contains(options.width), (1...30_000).contains(options.height),
+        guard (1...DocumentLimits.maxSide).contains(options.width), (1...DocumentLimits.maxSide).contains(options.height),
               options.resolution.isFinite, (1...9600).contains(options.resolution) else { throw ProjectError.tooLarge }
         let old = snapshot.manifest
         var manifest = ProjectManifest(resolution: options.resolution, documentID: old.documentID,
@@ -22,9 +22,12 @@ actor ImageResizer {
             manifest.layers = old.layers
             return ProjectSnapshot(manifest: manifest, images: snapshot.images, masks: snapshot.masks)
         }
-        guard options.width * options.height <= 100_000_000 else { throw ProjectError.tooLarge }
+        guard options.width * options.height <= DocumentLimits.maxSurfacePixels else { throw ProjectError.tooLarge }
         let sx = CGFloat(options.width) / CGFloat(old.width)
         let sy = CGFloat(options.height) / CGFloat(old.height)
+        // Effects are sized in pixels, so they scale with the pixels, as Photoshop's Scale Styles does: by the mean of
+        // the two factors when the image is stretched. Live text and shapes are resampled into plain pixels.
+        let effectScale = (sx * sy).squareRoot()
         manifest.guides = old.guides?.map { $0.scaled(x: sx, y: sy) }
         var images: [UUID: ImportedImage] = [:]
         var masks: [UUID: ImportedImage] = [:]
@@ -42,8 +45,8 @@ actor ImageResizer {
                 size: CGSize(width: width, height: height), sampling: options.sampling)
             guard transform.isValid else { throw ProjectError.tooLarge }
             if layer.imageFile != nil {
-                guard (1...30_000).contains(width), (1...30_000).contains(height),
-                      width * height <= 100_000_000 - usedPixels else { throw ProjectError.tooLarge }
+                guard (1...DocumentLimits.maxSide).contains(width), (1...DocumentLimits.maxSide).contains(height),
+                      width * height <= DocumentLimits.documentPixelBudget - usedPixels else { throw ProjectError.tooLarge }
                 usedPixels += width * height
                 guard let source = snapshot.images[layer.id] else { throw ProjectError.missingImage }
                 let asset = try autoreleasepool {
@@ -76,8 +79,8 @@ actor ImageResizer {
                 // A mask on its own placement keeps its pixels; the placement scales with the canvas.
                 if (source.image.width == 1 && source.image.height == 1) || layer.maskPlacement != nil { masks[layer.id] = source }
                 else {
-                    guard (1...30_000).contains(width), (1...30_000).contains(height),
-                          width * height <= 100_000_000 - usedMaskPixels else { throw ProjectError.tooLarge }
+                    guard (1...DocumentLimits.maxSide).contains(width), (1...DocumentLimits.maxSide).contains(height),
+                          width * height <= DocumentLimits.documentPixelBudget - usedMaskPixels else { throw ProjectError.tooLarge }
                     usedMaskPixels += width * height
                     guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
                         bytesPerRow: width, space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue) else { throw ExportError.render }
@@ -95,7 +98,7 @@ actor ImageResizer {
             manifest.layers.append(ProjectLayerRecord(id: layer.id, name: layer.name, isVisible: layer.isVisible,
                 transform: transform, imageFile: layer.imageFile, parentID: layer.parentID, isGroup: layer.isGroup, opacity: layer.opacity, blendMode: layer.blendMode, maskFile: layer.maskFile, maskEnabled: layer.maskEnabled, maskSourceID: layer.maskSourceID, adjustment: layer.adjustment,
                 maskPlacement: layer.maskPlacement.map { $0.placing($0.unitToDocument.concatenating(CGAffineTransform(scaleX: sx, y: sy))) },
-                maskLinked: layer.maskLinked))
+                maskLinked: layer.maskLinked, effects: layer.effects?.scaled(by: effectScale)))
         }
         return ProjectSnapshot(manifest: manifest, images: images, masks: masks)
     }
@@ -111,8 +114,7 @@ extension EditorSession {
         beginEdit(actionName)
         let m = snapshot.manifest
         document = CanvasDocument(id: m.documentID, width: m.width, height: m.height,
-            layers: m.layers.map { ImageLayer(id: $0.id, asset: snapshot.images[$0.id], name: $0.name,
-                isVisible: $0.isVisible, transform: $0.transform, parentID: $0.parentID, isGroup: $0.isGroup == true, opacity: $0.opacity ?? 1, blendMode: $0.blendMode ?? .normal, mask: snapshot.mask(for: $0), maskSourceID: $0.maskSourceID, adjustment: $0.adjustment) }, resolution: m.resolution ?? 72, guides: m.guides ?? [])
+            layers: snapshot.documentLayers, resolution: m.resolution ?? 72, guides: m.guides ?? [])
         endEdit()
         viewport.fit(documentSize: document!.size)
     }

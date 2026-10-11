@@ -87,8 +87,10 @@ struct LevelsSheet: View {
         .disabled(edit?.committing == true)
     }
     private func field(_ name: String, _ binding: Binding<Double>, decimals: Int) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
+        let range: ClosedRange<Double> = name == "Gamma" ? 0.1...9.99 : 0...255
+        return VStack(alignment: .leading, spacing: 5) {
             Text(name).font(.caption).foregroundStyle(.secondary)
+                .scrubbable(sensitivity: decimals == 0 ? 1 : 0.01, value: binding, range: range)
             TextField(name, value: binding, format: .number.precision(.fractionLength(decimals)))
                 .textFieldStyle(.roundedBorder).multilineTextAlignment(.trailing).frame(width: 80)
                 .accessibilityIdentifier("levels\(name.replacingOccurrences(of: " ", with: ""))")

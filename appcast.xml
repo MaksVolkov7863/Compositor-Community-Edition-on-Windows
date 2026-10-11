@@ -3,13 +3,20 @@
   <channel>
     <title>Compositor</title>
     <item>
-      <title>Version 1.2.2</title>
-      <pubDate>Tue, 22 Sep 2026 02:40:06 +0000</pubDate>
-      <sparkle:version>17</sparkle:version>
-      <sparkle:shortVersionString>1.2.2</sparkle:shortVersionString>
-      <sparkle:minimumSystemVersion>26.5</sparkle:minimumSystemVersion>
-      <link>https://github.com/robbietilton/Compositor/releases/tag/v1.2.2</link>
-      <enclosure url="https://github.com/robbietilton/Compositor/releases/download/v1.2.2/Compositor.dmg" sparkle:edSignature="k1rXcvvQn+s1qke3YA4GK4YxfKs/WKyfWTU4pMazA+T974goTRdLP0yhjqTCokq3vlN5jhOKQUwME/lDeJclAg==" length="8075835" type="application/octet-stream"/>
+      <title>Version 1.4.9</title>
+      <pubDate>Sat, 10 Oct 2026 06:11:26 +0000</pubDate>
+      <sparkle:version>44</sparkle:version>
+      <sparkle:shortVersionString>1.4.9</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+      <link>https://github.com/robbietilton/Compositor/releases/tag/v1.4.9</link>
+      <changes><![CDATA[Camera Raw Filter now matches Photoshop's: white balance, light, color, mixer, curves, grading and vignettes
+Camera Raw previews update up to 20× faster
+Layer effects and live text survive Canvas Size, Image Size, Crop, Trim and adjustments
+Import WebP images
+⌘ or ⌃ with a middle-button drag zooms
+Closing the last tab no longer counts up Untitled numbers
+Future updates list what's new right in the update window]]></changes>
+      <enclosure url="https://github.com/robbietilton/Compositor/releases/download/v1.4.9/Compositor.dmg" sparkle:edSignature="J76ruNplcfYTCxkYvA04nnesxjKJ3mZEHZQKtlI+Gp8SQTcvZ9nV0R9FbSiRCS8Db6ST3p12cxGJLeXzRvEKCQ==" length="8157007" type="application/octet-stream"/>
     </item>
   </channel>
 </rss>

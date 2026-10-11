@@ -7,7 +7,7 @@ nonisolated enum ExportError: LocalizedError {
     case tooLarge, render, encode
     var errorDescription: String? {
         switch self {
-        case .tooLarge: "Image export supports canvases up to 100 megapixels and 30,000 pixels per side."
+        case .tooLarge: "Image export supports canvases up to \(DocumentLimits.maxSurfaceMegapixels) megapixels and \(DocumentLimits.maxSide.formatted()) pixels per side."
         case .render: "The canvas could not be rendered. Try a smaller canvas."
         case .encode: "The image could not be encoded."
         }
@@ -19,8 +19,8 @@ actor ImageExporter {
 
     func render(_ snapshot: ProjectSnapshot) throws -> ExportRaster {
         let width = snapshot.manifest.width, height = snapshot.manifest.height
-        guard (1...30_000).contains(width), (1...30_000).contains(height),
-              width * height <= 100_000_000 else { throw ExportError.tooLarge }
+        guard (1...DocumentLimits.maxSide).contains(width), (1...DocumentLimits.maxSide).contains(height),
+              width * height <= DocumentLimits.maxSurfacePixels else { throw ExportError.tooLarge }
         return try autoreleasepool {
             guard let space = CGColorSpace(name: CGColorSpace.sRGB),
                   let context = CGContext(data: nil, width: width, height: height,
@@ -75,11 +75,59 @@ actor ImageExporter {
         }
     }
 
+    /// The Space-bar preview, saved in the project's QuickLook folder: the flattened image on white, a JPEG up to
+    /// 1,024 px on the long side, about 100–200 KB. Nil for canvases too large to flatten on every save.
+    func quickLookImages(_ snapshot: ProjectSnapshot) -> QuickLookImages? {
+        guard snapshot.manifest.width * snapshot.manifest.height <= 50_000_000,
+              let raster = try? render(snapshot),
+              let preview = try? scaledJPEG(raster.image, longSide: 1024) else { return nil }
+        return QuickLookImages(preview: preview)
+    }
+
+    private func scaledJPEG(_ image: CGImage, longSide: CGFloat) throws -> Data {
+        let scale = min(1, longSide / CGFloat(max(image.width, image.height)))
+        let width = max(1, Int((CGFloat(image.width) * scale).rounded())), height = max(1, Int((CGFloat(image.height) * scale).rounded()))
+        return try autoreleasepool {
+            guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+                                          space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)
+            else { throw ExportError.render }
+            let bounds = CGRect(x: 0, y: 0, width: width, height: height)
+            context.setFillColor(gray: 1, alpha: 1)
+            context.fill(bounds)
+            context.interpolationQuality = .high
+            context.draw(image, in: bounds)
+            guard let flattened = context.makeImage() else { throw ExportError.render }
+            return try encode(flattened, type: .jpeg, properties: [kCGImageDestinationLossyCompressionQuality: 0.8] as CFDictionary)
+        }
+    }
+
     func pngData(_ snapshot: ProjectSnapshot) throws -> Data {
-        let raster = try render(snapshot)
-        return try encode(raster.image, type: .png, properties: [
+        try pngData(render(snapshot))
+    }
+
+    func pngData(_ raster: ExportRaster) throws -> Data {
+        try encode(raster.image, type: .png, properties: [
             kCGImagePropertyDPIWidth: raster.resolution, kCGImagePropertyDPIHeight: raster.resolution
         ] as CFDictionary)
+    }
+
+    /// The flattened canvas at another size, for Export As: resampled at high quality, keeping its resolution, so a
+    /// smaller copy is a smaller print too.
+    func resized(_ raster: ExportRaster, width: Int, height: Int) throws -> ExportRaster {
+        guard width != raster.image.width || height != raster.image.height else { return raster }
+        guard (1...DocumentLimits.maxSide).contains(width), (1...DocumentLimits.maxSide).contains(height),
+              width * height <= DocumentLimits.maxSurfacePixels else { throw ExportError.tooLarge }
+        try Task.checkCancellation()
+        return try autoreleasepool {
+            guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+                  let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
+                                          bytesPerRow: width * 4, space: space,
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { throw ExportError.render }
+            context.interpolationQuality = .high
+            context.draw(raster.image, in: CGRect(x: 0, y: 0, width: width, height: height))
+            guard let image = context.makeImage() else { throw ExportError.render }
+            return ExportRaster(image: image, resolution: raster.resolution)
+        }
     }
 
     private func encode(_ image: CGImage, type: UTType, properties: CFDictionary? = nil) throws -> Data {
@@ -115,15 +163,61 @@ actor ImageExporter {
             guard let source = CGImageSourceCreateWithData(data as CFData, nil),
                   let preview = CGImageSourceCreateThumbnailAtIndex(source, 0, [
                     kCGImageSourceCreateThumbnailFromImageAlways: true,
-                    kCGImageSourceThumbnailMaxPixelSize: 1000,
+                    // Full size, so the dialog's 100% view shows the real artifacts; capped to keep memory in bounds.
+                    kCGImageSourceThumbnailMaxPixelSize: min(max(image.width, image.height), 8192),
+                    kCGImageSourceShouldCacheImmediately: true,
                     kCGImageSourceCreateThumbnailWithTransform: true
                   ] as CFDictionary) else { throw ExportError.encode }
             return JPEGResult(data: data, preview: preview)
         }
     }
 
+    /// The picture over a solid color, as a page with that background shows it.
+    func flattened(_ raster: ExportRaster, over background: CGColor) throws -> CGImage {
+        let image = raster.image
+        guard let context = CGContext(data: nil, width: image.width, height: image.height, bitsPerComponent: 8,
+                                      bytesPerRow: image.width * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                      bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { throw ExportError.render }
+        let bounds = CGRect(x: 0, y: 0, width: image.width, height: image.height)
+        context.setFillColor(background)
+        context.fill(bounds)
+        context.draw(image, in: bounds)
+        guard let flattened = context.makeImage() else { throw ExportError.render }
+        return flattened
+    }
+
     func exportPNG(_ snapshot: ProjectSnapshot, to url: URL) throws {
         let data = try pngData(snapshot)
+        try write(data, to: url)
+    }
+
+    /// One page the document's printed size (its pixels at its resolution), holding the flattened canvas at full
+    /// resolution. Core Graphics keeps the pixels lossless, and transparency stays transparent, as in a PNG.
+    func pdfData(_ snapshot: ProjectSnapshot) throws -> Data {
+        try pdfData(render(snapshot))
+    }
+
+    /// `background` fills the page under the picture; nil leaves it clear, as a viewer then shows its own paper.
+    func pdfData(_ raster: ExportRaster, background: CGColor? = nil) throws -> Data {
+        let pointsPerPixel = 72 / (raster.resolution > 0 ? raster.resolution : 72)
+        var page = CGRect(x: 0, y: 0, width: CGFloat(raster.image.width) * pointsPerPixel,
+                          height: CGFloat(raster.image.height) * pointsPerPixel)
+        let data = NSMutableData()
+        guard let consumer = CGDataConsumer(data: data),
+              let context = CGContext(consumer: consumer, mediaBox: &page, nil) else { throw ExportError.encode }
+        context.beginPDFPage(nil)
+        if let background {
+            context.setFillColor(background)
+            context.fill(page)
+        }
+        context.draw(raster.image, in: page)
+        context.endPDFPage()
+        context.closePDF()
+        return data as Data
+    }
+
+    func exportPDF(_ snapshot: ProjectSnapshot, to url: URL) throws {
+        let data = try pdfData(snapshot)
         try write(data, to: url)
     }
 
@@ -138,6 +232,9 @@ actor ImageExporter {
     }
 }
 
+nonisolated struct QuickLookImages: Sendable {
+    let preview: Data
+}
 nonisolated struct ExportRaster: @unchecked Sendable {
     let image: CGImage
     var resolution: Double = 72

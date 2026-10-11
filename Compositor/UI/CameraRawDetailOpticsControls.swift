@@ -47,6 +47,9 @@ struct CameraRawDetailControls: View {
         let value = raw.detail[keyPath: key]
         return HStack(spacing: 10) {
             Text(title).frame(minWidth: CameraRawControls.labelWidth, alignment: .leading).help(help)
+                .scrubbable(sensitivity: 1 / step,
+                            value: Binding(get: { raw.detail[keyPath: key] },
+                                           set: { assignDetail(key, $0, maskingPreview: false) }), range: range)
             CameraRawSlider(value: value, range: range, track: .plain, help: help,
                             onChange: { rawValue in
                                 let stepped = (rawValue * step).rounded() / step
@@ -143,6 +146,9 @@ struct CameraRawOpticsControls: View {
         let value = raw.optics[keyPath: key]
         return HStack(spacing: 10) {
             Text(title).frame(minWidth: CameraRawControls.labelWidth, alignment: .leading).help(help)
+                .scrubbable(sensitivity: 1,
+                            value: Binding(get: { raw.optics[keyPath: key] },
+                                           set: { newValue in update { $0.cameraRaw.optics[keyPath: key] = newValue } }), range: range)
             CameraRawSlider(value: value, range: range, track: .plain, help: help,
                             onChange: { rawValue in
                                 let stepped = range.lowerBound < 0 ? rawValue : rawValue.rounded()
