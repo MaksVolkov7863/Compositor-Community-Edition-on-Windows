@@ -1,6 +1,6 @@
 {
   "name": "compositor-windows",
-  "version": "1.1.0",
+  "version": "1.3.3",
   "description": "Compositor for Windows - The lightweight, focused Photoshop alternative",
   "main": "src/main.js",
   "repository": {

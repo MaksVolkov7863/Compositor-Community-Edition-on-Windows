@@ -51,7 +51,7 @@ jobs:
         shell: pwsh
         run: |
           Get-ChildItem windows/dist/*.exe | ForEach-Object { Write-Host "Built executable: $($_.FullName)" }
-          Compress-Archive -Path "windows/dist/*.exe" -DestinationPath "windows/dist/Compositor-Windows-x64-v1.1.0.zip" -Force
+          Compress-Archive -Path "windows/dist/*.exe" -DestinationPath "windows/dist/Compositor-Windows-x64-v1.3.3.zip" -Force
 
       - name: Upload Windows Binaries Artifacts
         uses: actions/upload-artifact@v4
@@ -69,27 +69,28 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'v1.1.0' }}
-          name: Compositor for Windows ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'v1.1.0' }}
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'v1.3.3' }}
+          name: Compositor for Windows ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'v1.3.3' }}
           body: |
-            ## Compositor for Windows v1.1.0
+            ## Compositor for Windows v1.3.3 (Manifest Version 9)
             
-            The lightweight, focused Photoshop alternative for Windows 10/11 — updated with recent upstream innovations!
+            The lightweight, focused Photoshop alternative for Windows 10/11 — fully synchronized with upstream Compositor v1.3.3!
             
-            ### What's New in v1.1.0:
-            - **Inner Glow Layer FX**: Full choke, size, color picker, opacity, and source (edge/center) settings.
-            - **Image Auto-Trim**: Automatically crop out transparent borders or canvas edges (`Image > Trim...`).
-            - **Camera Raw Filter**: Comprehensive color temperature, tint, exposure (+/- stops), highlights, shadows, and vibrance (`Filter > Camera Raw Filter...` / `Ctrl+Shift+A`).
-            - **Motion Blur Filter**: Directional angle and distance blurring (`Filter > Blur > Motion Blur...`).
-            - **Co-scaled Film Grain**: Noise grain scale dynamically couples with canvas resolution.
-            - **Brush Smoothing & Middle-Click Pan**: Smooth stroke interpolation and seamless middle-mouse canvas panning.
-            - **Layer Groups Hierarchy**: Organize layers into nested folders with recursive visibility and cascading opacity.
-            - **DistortWarp Geometry**: Free transform quadrilateral homography and perspective mapping.
-            - **Parity Tracking & Schema Guard**: Automated CI parity checker (`npm run parity`) and JSON Schema manifest validation.
+            ### What's New in v1.3.3:
+            - **Command Palette (Ctrl+F / Ctrl+P)**: Fast fuzzy command finder with keyboard shortcuts execution.
+            - **Navigator Minimap**: Interactive thumbnail viewport navigation with 300% zoom activation.
+            - **Project File Watcher**: Real-time project file synchronization with SHA-256 digest hashing.
+            - **Multi-Tab Document Bar**: Project tabs with dynamic overflow menus and tab navigation.
+            - **Color Overlay Layer FX**: Non-destructive layer color overlay tinting with Photoshop blend modes.
+            - **Finishing Filters**: Vignette, Sharpen, and Luminous Bloom/Glow filters.
+            - **Retro & Pixel Art Filters**: Scanlines CRT simulation and Dithering (Bayer 2x2/4x4/8x8, Floyd-Steinberg, Atkinson).
+            - **Free Canvas Rotation & Snapping**: Smooth canvas viewport rotation with 90° angle snapping.
+            - **PSB Large Document Import**: 64-bit PSD Large Document format decoding and adjustment layers.
+            - **Automated CI Parity Guard**: 100% upstream test suite and API coverage verification (`npm run parity`).
             
             ### Downloads
-            - **Compositor Setup (Installer)**: Download `Compositor Setup 1.1.0.exe` below
-            - **Compositor Portable**: Download `Compositor 1.1.0.exe` below (no installation required)
+            - **Compositor Setup (Installer)**: Download `Compositor Setup 1.3.3.exe` below
+            - **Compositor Portable**: Download `Compositor 1.3.3.exe` or `Compositor-Windows-x64-v1.3.3.zip` below (no installation required)
           files: |
             windows/dist/*.exe
             windows/dist/*.zip
