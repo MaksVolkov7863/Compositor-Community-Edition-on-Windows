@@ -1,5 +1,4 @@
-use compositor-core::layer::BlendMode;
-use wide::f32x4;
+use compositor_core::layer::BlendMode;
 
 #[inline(always)]
 fn blend_channel(base: f32, blend: f32, mode: BlendMode) -> f32 {

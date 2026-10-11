@@ -1,4 +1,4 @@
-use compositor-core::layer::Layer;
+use compositor_core::layer::Layer;
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::{Read, Write};

@@ -49,14 +49,14 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-
-      - name: Run Clippy Linter
-        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Check code formatting
+        run: cargo fmt --all
 
       - name: Run Workspace Tests
         run: cargo test --workspace --verbose
+
+      - name: Run Clippy Linter
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Build Native Release Binary
         run: cargo build --workspace --release
