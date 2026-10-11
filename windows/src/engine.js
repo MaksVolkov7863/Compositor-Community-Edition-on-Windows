@@ -3083,6 +3083,56 @@ class CompositorEngine {
         };
     }
 
+    exportTIFF(options = {}) {
+        if (this.width > 30000 || this.height > 30000) {
+            throw new Error('Canvas size exceeds maximum export dimensions of 30,000 pixels');
+        }
+
+        const outCanvas = this.createCanvas(this.width, this.height);
+        const outCtx = outCanvas.getContext('2d');
+
+        for (const layer of this.layers) {
+            if (!layer.visible) continue;
+            outCtx.save();
+            outCtx.globalAlpha = layer.opacity;
+            outCtx.globalCompositeOperation = this.mapBlendMode(layer.blendMode);
+            outCtx.drawImage(layer.canvas, layer.x, layer.y);
+            outCtx.restore();
+        }
+
+        const imgData = outCtx.getImageData(0, 0, this.width, this.height);
+        const { encodeTIFF } = require('./importers/tiff-importer');
+        const buffer = encodeTIFF(imgData.data, this.width, this.height);
+
+        return {
+            width: this.width,
+            height: this.height,
+            format: 'image/tiff',
+            canvas: outCanvas,
+            buffer,
+            dataUrl: 'data:image/tiff;base64,' + buffer.toString('base64')
+        };
+    }
+
+    async importImage(input, options = {}) {
+        const { ImageImporter } = require('./image-importer');
+        const imported = await ImageImporter.shared.decode(input, options);
+        const layer = this.createLayer(imported.name || 'Imported Layer', imported.width, imported.height);
+        layer.x = options.x !== undefined ? options.x : 0;
+        layer.y = options.y !== undefined ? options.y : 0;
+
+        const imgData = layer.ctx.createImageData(imported.width, imported.height);
+        imgData.data.set(imported.data);
+        layer.ctx.putImageData(imgData, 0, 0);
+
+        this.layers.push(layer);
+        this.activeLayerId = layer.id;
+        this.recordHistory(`Import ${imported.name}`);
+        this.render();
+        this.notifyUI();
+        return layer;
+    }
+
     // --- Selection Clipboard & Feathering ---
 
     copySelection() {

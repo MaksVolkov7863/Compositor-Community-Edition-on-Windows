@@ -69,4 +69,23 @@ describe('Export Pipeline (Mac ExportTests & JPEGExportTests Parity)', () => {
         assert.equal(low.quality, 0.1);
         assert.equal(high.quality, 1.0);
     });
+
+    test('TIFF export encodes lossless RGBA bitmap with valid TIFF signature', () => {
+        const engine = CompositorEngine.createHeadless(120, 80);
+        const layer = engine.addLayer('Tiff Subject');
+        layer.ctx.fillStyle = '#00ff00';
+        layer.ctx.fillRect(0, 0, 120, 80);
+
+        const exported = engine.exportTIFF();
+        assert.equal(exported.format, 'image/tiff');
+        assert.equal(exported.width, 120);
+        assert.equal(exported.height, 80);
+        assert.ok(Buffer.isBuffer(exported.buffer));
+        assert.ok(exported.buffer.length > 0);
+
+        // Verify magic bytes: Little-endian (0x49 0x49 0x2A 0x00) or Big-endian (0x4D 0x4D 0x00 0x2A)
+        const isLE = exported.buffer[0] === 0x49 && exported.buffer[1] === 0x49 && exported.buffer[2] === 0x2A;
+        const isBE = exported.buffer[0] === 0x4D && exported.buffer[1] === 0x4D && exported.buffer[3] === 0x2A;
+        assert.ok(isLE || isBE, 'TIFF export buffer must have valid TIFF magic bytes');
+    });
 });

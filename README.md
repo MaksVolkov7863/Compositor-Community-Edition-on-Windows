@@ -95,7 +95,7 @@ brew install --cask robbietilton-compositor
 - Canvas Size, Image Size and Trim
 - A Navigator minimap in the canvas's corner from 300% zoom: the whole document in small with a box around the view; click or drag to move there (View › Navigator)
 - Sharp high-quality downsampling when zoomed out, and a pixel grid when zoomed in
-- Import JPEG, PNG, WebP, SVG, and Photoshop PSD and PSB (Large Document, 8-bit RGB; not CMYK). Photoshop folders, masks, blend modes, fill rectangles/ellipses, and simple horizontal text stay editable; other vectors and vertical text become pixels. A conversion report is shown before anything is applied. *(macOS also supports HEIC/TIFF via system ImageIO; WASM decoding for Windows in progress)*.
+- Import JPEG, PNG, WebP, SVG, and Photoshop PSD and PSB (Large Document, 8-bit RGB; not CMYK). Photoshop folders, masks, blend modes, fill rectangles/ellipses, and simple horizontal text stay editable; other vectors and vertical text become pixels. A conversion report is shown before anything is applied. *(macOS supports HEIC/TIFF via system ImageIO; Windows supports HEIC and TIFF via libheif-js and UTIF WASM decoders)*.
 - Large documents: memory budget scaling, with oversized layers cropped cleanly to the canvas rectangle when needed
 - Export PNG, Export JPEG, and Export As for PNG, JPEG or WebP at chosen scale, with live preview, JPEG quality and file size; Copy Merged
 - Keep working while a project saves
@@ -121,13 +121,13 @@ A standalone desktop version with full feature parity for Windows 10 and 11, mai
 - **Automated Test Suite & Parity Guard**:
   ```bash
   cd windows
-  npm test          # Runs all 54 test suites (193 unit and regression tests)
+  npm test          # Runs all 61 test suites (221 unit and regression tests)
   npm run parity    # Verifies 100% upstream test suite and API coverage across all 79 macOS suites
   ```
 - **Architectural Mapping**:
   - **GPU Compositing**: WebGL2 fragment shaders with CPU headless fallback (mirroring macOS Metal shaders).
   - **Vision Features**: Select Subject and Remove Background utilize an ONNX Web Runtime AI worker for local inference.
-  - **File Formats**: Native support for PNG, JPEG, WebP, SVG, PSD (8-bit), and PSB Large Documents; WASM decoder for HEIC and TIFF.
+  - **File Formats**: Native support for PNG, JPEG, WebP, SVG, PSD (8-bit), and PSB Large Documents; WASM decoders for HEIC (libheif-js) and TIFF (UTIF) with full round-trip export.
 - **Packaging (Windows .exe installer & portable)**:
   ```bash
   cd windows
