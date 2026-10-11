@@ -13,7 +13,8 @@
     "benchmark": "node ../scripts/benchmark-pipeline.js",
     "start": "electron src/main.js",
     "pack": "electron-builder --dir",
-    "dist": "electron-builder --win --x64 --publish never"
+    "dist": "electron-builder --win --x64 --publish never",
+    "smoke": "electron tests/electron-smoke.js"
   },
   "keywords": [
     "compositor",
