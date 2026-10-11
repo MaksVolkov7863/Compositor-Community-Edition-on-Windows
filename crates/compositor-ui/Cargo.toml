@@ -1,0 +1,16 @@
+[package]
+name = "compositor-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Native desktop user interface built with Slint for Compositor"
+
+[dependencies]
+compositor-core = { path = "../compositor-core" }
+compositor-render = { path = "../compositor-render" }
+compositor-format = { path = "../compositor-format" }
+compositor-gpu = { path = "../compositor-gpu" }
+slint = "1.5"
+
+[build-dependencies]
+slint-build = "1.5"

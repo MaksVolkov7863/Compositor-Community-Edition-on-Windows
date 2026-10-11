@@ -1,0 +1,26 @@
+[workspace]
+members = [
+    "crates/compositor-core",
+    "crates/compositor-render",
+    "crates/compositor-gpu",
+    "crates/compositor-format",
+    "crates/compositor-ui",
+]
+resolver = "2"
+
+[workspace.package]
+version = "1.3.3"
+edition = "2021"
+authors = ["Compositor Community Contributors"]
+license = "MIT"
+repository = "https://github.com/MaksVolkov7863/Compositor-Community-Edition-on-Windows"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+
+[profile.dev]
+opt-level = 1
+debug = true

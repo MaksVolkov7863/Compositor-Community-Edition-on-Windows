@@ -20,6 +20,11 @@ xcuserdata/
 *.certSigningRequest
 .env
 
+# Rust target
+target/
+**/target/
+Cargo.lock.bak
+
 # Claude Code settings personal to this machine
 .claude/settings.local.json
 BUILD_PLAN.md

@@ -1,0 +1,70 @@
+name: Native Rust CI & Verification
+
+on:
+  push:
+    branches:
+      - rust
+      - main
+    paths:
+      - 'crates/**'
+      - 'Cargo.toml'
+      - '.github/workflows/rust-ci.yml'
+  pull_request:
+    branches:
+      - rust
+      - main
+    paths:
+      - 'crates/**'
+      - 'Cargo.toml'
+      - '.github/workflows/rust-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  rust-check-and-build:
+    name: Build & Test Native Rust Engine
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Cargo registry & build cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run Clippy Linter
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Run Workspace Tests
+        run: cargo test --workspace --verbose
+
+      - name: Build Native Release Binary
+        run: cargo build --workspace --release
+
+      - name: Upload Native Windows Binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: Compositor-Native-Windows-x64
+          path: target/release/compositor-ui.exe
+          if-no-files-found: warn
+          retention-days: 30
