@@ -247,6 +247,18 @@ function createMockCanvas(w, h) {
             return { data: sub, width: clampedW, height: clampedH };
         },
 
+        createImageData: (wOrImg, hOrNone) => {
+            let cw = typeof wOrImg === 'object' && wOrImg !== null ? wOrImg.width : wOrImg;
+            let ch = typeof wOrImg === 'object' && wOrImg !== null ? wOrImg.height : hOrNone;
+            cw = Math.max(1, Math.round(cw || 1));
+            ch = Math.max(1, Math.round(ch || 1));
+            return {
+                width: cw,
+                height: ch,
+                data: new Uint8ClampedArray(cw * ch * 4)
+            };
+        },
+
         putImageData: (imgData, x = 0, y = 0) => {
             if (!imgData || !imgData.data) return;
             const iw = imgData.width || 0;
@@ -313,7 +325,10 @@ function createMockCanvas(w, h) {
                     const dIdx = (dstY * bufW + dstX) * 4;
 
                     if (isDestIn) {
-                        const srcAlpha = (sdata[sIdx + 3] / 255) * (sdata[sIdx] / 255) * alpha;
+                        let srcAlpha = (sdata[sIdx + 3] / 255) * alpha;
+                        if (sdata[sIdx + 3] === 255 && sdata[sIdx] === sdata[sIdx + 1] && sdata[sIdx] === sdata[sIdx + 2]) {
+                            srcAlpha *= (sdata[sIdx] / 255);
+                        }
                         buffer[dIdx + 3] = Math.round(buffer[dIdx + 3] * srcAlpha);
                     } else if (isDestOut) {
                         const srcAlpha = (sdata[sIdx + 3] / 255) * alpha;
@@ -535,8 +550,8 @@ class CompositorEngine {
         return this.layers.find(l => l.id === this.activeLayerId) || null;
     }
 
-    addLayer(name = 'Layer') {
-        const newLayer = this.createLayer(name, this.width, this.height);
+    addLayer(name = 'Layer', w = this.width, h = this.height) {
+        const newLayer = this.createLayer(name, w, h);
         const activeIdx = this.layers.findIndex(l => l.id === this.activeLayerId);
         if (activeIdx !== -1) {
             this.layers.splice(activeIdx + 1, 0, newLayer);
@@ -550,9 +565,9 @@ class CompositorEngine {
         return newLayer;
     }
 
-    duplicateLayer() {
-        const active = this.getActiveLayer();
-        if (!active) return;
+    duplicateLayer(layerId = null) {
+        const active = layerId ? this.layers.find(l => l.id === layerId) : this.getActiveLayer();
+        if (!active) return null;
         const dup = this.createLayer(active.name + ' copy', active.width, active.height);
         dup.ctx.drawImage(active.canvas, 0, 0);
         dup.opacity = active.opacity;
@@ -580,6 +595,27 @@ class CompositorEngine {
         this.recordHistory('Duplicate Layer');
         this.render();
         this.notifyUI();
+        return dup;
+    }
+
+    addLayerMask(layerId) {
+        const layer = typeof layerId === 'object' ? layerId : this.layers.find(l => l.id === layerId);
+        if (!layer) return false;
+        this.addMaskToLayer(layer);
+        return true;
+    }
+
+    beginBrush(x, y) {
+        this.currentTool = 'brush';
+        if (this.pointerDown) this.pointerDown(x, y);
+    }
+
+    drawBrush(x, y) {
+        if (this.pointerMove) this.pointerMove(x, y);
+    }
+
+    endBrush() {
+        if (this.pointerUp) this.pointerUp();
     }
 
     addGroup(name = 'Group') {
@@ -795,6 +831,18 @@ class CompositorEngine {
     render() {
         this.ctx.clearRect(0, 0, this.width, this.height);
 
+        // Mask Alone View (Mac MaskAlone parity)
+        if (this.isMaskAlone && this.maskAloneLayerId) {
+            const mLayer = this.layers.find(l => l.id === this.maskAloneLayerId);
+            if (mLayer && mLayer.hasMask && mLayer.maskCanvas) {
+                this.ctx.fillStyle = '#000000';
+                this.ctx.fillRect(0, 0, this.width, this.height);
+                this.ctx.drawImage(mLayer.maskCanvas, mLayer.x, mLayer.y);
+                this.renderOverlay();
+                return;
+            }
+        }
+
         for (let i = 0; i < this.layers.length; i++) {
             const layer = this.layers[i];
             if (!layer.visible) continue;
@@ -886,6 +934,35 @@ class CompositorEngine {
                     igCtx.drawImage(layer.canvas, 0, 0);
 
                     this.ctx.drawImage(igCanvas, layer.x, layer.y);
+                }
+            }
+
+            // Layer Effects: Color Overlay
+            if (layer.effects && layer.effects.colorOverlay && layer.effects.colorOverlay.enabled !== false) {
+                const co = layer.effects.colorOverlay;
+                const coOp = co.opacity !== undefined ? co.opacity : 1.0;
+                if (coOp > 0) {
+                    const coCanvas = this.createCanvas(layer.width, layer.height);
+                    coCanvas.width = layer.width;
+                    coCanvas.height = layer.height;
+                    const coCtx = coCanvas.getContext('2d');
+
+                    const r = Math.round((co.red !== undefined ? co.red : 1) * 255);
+                    const g = Math.round((co.green !== undefined ? co.green : 0) * 255);
+                    const b = Math.round((co.blue !== undefined ? co.blue : 0) * 255);
+
+                    coCtx.fillStyle = `rgba(${r}, ${g}, ${b}, ${coOp})`;
+                    coCtx.fillRect(0, 0, layer.width, layer.height);
+
+                    coCtx.globalCompositeOperation = 'destination-in';
+                    coCtx.drawImage(layer.canvas, 0, 0);
+
+                    this.ctx.save();
+                    if (co.blendMode) {
+                        this.ctx.globalCompositeOperation = this.mapBlendMode(co.blendMode);
+                    }
+                    this.ctx.drawImage(coCanvas, layer.x, layer.y);
+                    this.ctx.restore();
                 }
             }
 
@@ -3133,6 +3210,593 @@ class CompositorEngine {
         this.recordHistory('Layer Effect: Inner Glow');
         this.render();
         return true;
+    }
+
+    validateColorOverlay(effect) {
+        if (!effect || typeof effect !== 'object') return false;
+        if (effect.opacity !== undefined && (typeof effect.opacity !== 'number' || effect.opacity < 0 || effect.opacity > 1)) return false;
+        if (effect.red !== undefined && (typeof effect.red !== 'number' || effect.red < 0 || effect.red > 1)) return false;
+        if (effect.green !== undefined && (typeof effect.green !== 'number' || effect.green < 0 || effect.green > 1)) return false;
+        if (effect.blue !== undefined && (typeof effect.blue !== 'number' || effect.blue < 0 || effect.blue > 1)) return false;
+        return true;
+    }
+
+    setColorOverlay(layerId, effect) {
+        const layer = this.layers.find(l => l.id === layerId);
+        if (!layer) return false;
+        if (effect === null) {
+            if (layer.effects) delete layer.effects.colorOverlay;
+            this.recordHistory('Remove Color Overlay');
+            this.render();
+            return true;
+        }
+        if (!this.validateColorOverlay(effect)) {
+            throw new Error('Invalid Color Overlay parameters');
+        }
+        layer.effects = layer.effects || {};
+        layer.effects.colorOverlay = {
+            enabled: effect.enabled !== false,
+            opacity: effect.opacity !== undefined ? effect.opacity : 1.0,
+            blendMode: effect.blendMode || 'Normal',
+            red: effect.red !== undefined ? effect.red : 1.0,
+            green: effect.green !== undefined ? effect.green : 0.0,
+            blue: effect.blue !== undefined ? effect.blue : 0.0
+        };
+        this.recordHistory('Layer Effect: Color Overlay');
+        this.render();
+        return true;
+    }
+
+    // --- Dither Filter (Mac RawDither / Dither parity) ---
+    applyDither(layerId, options = {}) {
+        const layer = this.layers.find(l => l.id === layerId);
+        if (!layer || !layer.canvas) return false;
+
+        const ctx = layer.ctx || layer.canvas.getContext('2d');
+        const imgData = ctx.getImageData(0, 0, layer.width, layer.height);
+        const data = imgData.data;
+        const w = layer.width, h = layer.height;
+
+        const method = options.method || 'bayer4'; // 'bayer2', 'bayer4', 'bayer8', 'floyd-steinberg', 'atkinson'
+        const chunky = Math.max(1, parseInt(options.chunky) || 1);
+        const palette = options.palette || 'mono'; // 'mono', 'gray2', 'rgb3', 'cga'
+
+        // 1. Chunky pixel downsampling if chunky > 1
+        if (chunky > 1) {
+            for (let y = 0; y < h; y += chunky) {
+                for (let x = 0; x < w; x += chunky) {
+                    const i = (y * w + x) * 4;
+                    const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3];
+                    for (let cy = 0; cy < chunky && (y + cy) < h; cy++) {
+                        for (let cx = 0; cx < chunky && (x + cx) < w; cx++) {
+                            const idx = ((y + cy) * w + (x + cx)) * 4;
+                            data[idx] = r;
+                            data[idx + 1] = g;
+                            data[idx + 2] = b;
+                            data[idx + 3] = a;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Standard Bayer matrices normalized to [-0.5, 0.5]
+        const bayer2 = [
+            [0, 2],
+            [3, 1]
+        ].map(row => row.map(v => (v / 4) - 0.5));
+
+        const bayer4 = [
+            [ 0,  8,  2, 10],
+            [12,  4, 14,  6],
+            [ 3, 11,  1,  9],
+            [15,  7, 13,  5]
+        ].map(row => row.map(v => (v / 16) - 0.5));
+
+        const bayer8 = [
+            [ 0, 32,  8, 40,  2, 34, 10, 42],
+            [48, 16, 56, 24, 50, 18, 58, 26],
+            [12, 44,  4, 36, 14, 46,  6, 38],
+            [60, 28, 52, 20, 62, 30, 54, 22],
+            [ 3, 35, 11, 43,  1, 33,  9, 41],
+            [51, 19, 59, 27, 49, 17, 57, 25],
+            [15, 47,  7, 39, 13, 45,  5, 37],
+            [63, 31, 55, 23, 61, 29, 53, 21]
+        ].map(row => row.map(v => (v / 64) - 0.5));
+
+        if (method.startsWith('bayer')) {
+            const matrix = method === 'bayer2' ? bayer2 : (method === 'bayer8' ? bayer8 : bayer4);
+            const mSize = matrix.length;
+            const spread = options.spread !== undefined ? options.spread : 64;
+
+            for (let y = 0; y < h; y++) {
+                for (let x = 0; x < w; x++) {
+                    const i = (y * w + x) * 4;
+                    if (data[i + 3] === 0) continue;
+
+                    const threshold = matrix[y % mSize][x % mSize] * spread;
+                    for (let c = 0; c < 3; c++) {
+                        let val = data[i + c] + threshold;
+                        if (palette === 'mono') {
+                            val = val >= 128 ? 255 : 0;
+                        } else if (palette === 'gray2') {
+                            val = Math.round(val / 85) * 85;
+                        } else {
+                            val = Math.round(val / 64) * 64;
+                        }
+                        data[i + c] = Math.max(0, Math.min(255, val));
+                    }
+                }
+            }
+        } else if (method === 'floyd-steinberg' || method === 'atkinson') {
+            // Error diffusion
+            const isAtkinson = method === 'atkinson';
+            for (let y = 0; y < h; y++) {
+                for (let x = 0; x < w; x++) {
+                    const i = (y * w + x) * 4;
+                    if (data[i + 3] === 0) continue;
+
+                    for (let c = 0; c < 3; c++) {
+                        const oldVal = data[i + c];
+                        const newVal = oldVal >= 128 ? 255 : 0;
+                        data[i + c] = newVal;
+                        const err = oldVal - newVal;
+
+                        if (isAtkinson) {
+                            const diffuse = (dx, dy) => {
+                                const nx = x + dx, ny = y + dy;
+                                if (nx >= 0 && nx < w && ny >= 0 && ny < h) {
+                                    const ni = (ny * w + nx) * 4 + c;
+                                    data[ni] = Math.max(0, Math.min(255, data[ni] + (err >> 3)));
+                                }
+                            };
+                            diffuse(1, 0); diffuse(2, 0);
+                            diffuse(-1, 1); diffuse(0, 1); diffuse(1, 1);
+                            diffuse(0, 2);
+                        } else {
+                            const diffuse = (dx, dy, factor) => {
+                                const nx = x + dx, ny = y + dy;
+                                if (nx >= 0 && nx < w && ny >= 0 && ny < h) {
+                                    const ni = (ny * w + nx) * 4 + c;
+                                    data[ni] = Math.max(0, Math.min(255, data[ni] + (err * factor / 16)));
+                                }
+                            };
+                            diffuse(1, 0, 7);
+                            diffuse(-1, 1, 3);
+                            diffuse(0, 1, 5);
+                            diffuse(1, 1, 1);
+                        }
+                    }
+                }
+            }
+        }
+
+        ctx.putImageData(imgData, 0, 0);
+        this.recordHistory('Filter: Dither');
+        this.render();
+        return true;
+    }
+
+    // --- Scanlines Filter (Mac Scanlines parity) ---
+    applyScanlines(layerId, options = {}) {
+        const layer = this.layers.find(l => l.id === layerId);
+        if (!layer || !layer.canvas) return false;
+
+        const ctx = layer.ctx || layer.canvas.getContext('2d');
+        const imgData = ctx.getImageData(0, 0, layer.width, layer.height);
+        const data = imgData.data;
+        const w = layer.width, h = layer.height;
+
+        const spacing = Math.max(2, parseInt(options.lineSpacing || options.spacing) || 4);
+        const lineWidth = Math.max(1, parseInt(options.lineWidth || options.thickness) || 1);
+        const intensity = options.intensity !== undefined ? options.intensity : (options.opacity !== undefined ? options.opacity : 0.5);
+        const orientation = options.orientation || 'horizontal';
+        const glow = options.glow || 0;
+        const blackLevel = options.blackLevel || 0;
+
+        for (let y = 0; y < h; y++) {
+            for (let x = 0; x < w; x++) {
+                const i = (y * w + x) * 4;
+                if (data[i + 3] === 0) continue;
+
+                const pos = orientation === 'horizontal' ? y : x;
+                const bandPos = pos % spacing;
+                const isLine = bandPos < lineWidth;
+
+                if (!isLine) {
+                    const factor = Math.max(0, 1 - intensity * (1 - glow * 0.005));
+                    data[i] = Math.round(data[i] * factor + blackLevel);
+                    data[i + 1] = Math.round(data[i + 1] * factor + blackLevel);
+                    data[i + 2] = Math.round(data[i + 2] * factor + blackLevel);
+                } else if (blackLevel > 0) {
+                    data[i] = Math.min(255, data[i] + blackLevel);
+                    data[i + 1] = Math.min(255, data[i + 1] + blackLevel);
+                    data[i + 2] = Math.min(255, data[i + 2] + blackLevel);
+                }
+            }
+        }
+
+        ctx.putImageData(imgData, 0, 0);
+        this.recordHistory('Filter: Scanlines');
+        this.render();
+        return true;
+    }
+
+    // --- Finishing Filters (Vignette, Sharpen, Bloom/Glow) ---
+    applyVignette(layerId, options = {}) {
+        const layer = this.layers.find(l => l.id === layerId);
+        if (!layer || !layer.canvas) return false;
+
+        const ctx = layer.ctx || layer.canvas.getContext('2d');
+        const imgData = ctx.getImageData(0, 0, layer.width, layer.height);
+        const data = imgData.data;
+        const w = layer.width, h = layer.height;
+
+        const amount = options.amount !== undefined ? options.amount : 0.5;
+        const radius = options.radius !== undefined ? options.radius : 0.8;
+        const roundness = options.roundness !== undefined ? options.roundness : 1.0;
+        const cx = w / 2, cy = h / 2;
+        const maxDist = Math.sqrt(cx * cx + cy * cy) * radius;
+
+        for (let y = 0; y < h; y++) {
+            for (let x = 0; x < w; x++) {
+                const i = (y * w + x) * 4;
+                if (data[i + 3] === 0) continue;
+
+                const dx = (x - cx) * (roundness === 1 ? 1 : (w / h));
+                const dy = y - cy;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+
+                if (dist > maxDist * 0.5) {
+                    const vigFactor = Math.min(1, (dist - maxDist * 0.5) / (maxDist * 0.5));
+                    const darken = 1 - (vigFactor * amount);
+                    data[i] = Math.max(0, Math.round(data[i] * darken));
+                    data[i + 1] = Math.max(0, Math.round(data[i + 1] * darken));
+                    data[i + 2] = Math.max(0, Math.round(data[i + 2] * darken));
+                }
+            }
+        }
+
+        ctx.putImageData(imgData, 0, 0);
+        this.recordHistory('Filter: Vignette');
+        this.render();
+        return true;
+    }
+
+    applySharpen(layerId, amount = 0.5) {
+        const layer = this.layers.find(l => l.id === layerId);
+        if (!layer || !layer.canvas) return false;
+
+        const ctx = layer.ctx || layer.canvas.getContext('2d');
+        const src = ctx.getImageData(0, 0, layer.width, layer.height);
+        const dst = ctx.createImageData(layer.width, layer.height);
+        const s = src.data, d = dst.data;
+        const w = layer.width, h = layer.height;
+
+        const strength = Math.max(0.1, amount);
+        const center = 1 + 4 * strength;
+        const edge = -strength;
+
+        for (let y = 0; y < h; y++) {
+            for (let x = 0; x < w; x++) {
+                const i = (y * w + x) * 4;
+                d[i + 3] = s[i + 3];
+                if (s[i + 3] === 0 || x === 0 || y === 0 || x === w - 1 || y === h - 1) {
+                    d[i] = s[i]; d[i + 1] = s[i + 1]; d[i + 2] = s[i + 2];
+                    continue;
+                }
+
+                for (let c = 0; c < 3; c++) {
+                    const top = s[((y - 1) * w + x) * 4 + c];
+                    const bottom = s[((y + 1) * w + x) * 4 + c];
+                    const left = s[(y * w + (x - 1)) * 4 + c];
+                    const right = s[(y * w + (x + 1)) * 4 + c];
+                    const mid = s[i + c];
+
+                    const val = mid * center + (top + bottom + left + right) * edge;
+                    d[i + c] = Math.max(0, Math.min(255, Math.round(val)));
+                }
+            }
+        }
+
+        ctx.putImageData(dst, 0, 0);
+        this.recordHistory('Filter: Sharpen');
+        this.render();
+        return true;
+    }
+
+    applyBloomGlow(layerId, options = {}) {
+        const layer = this.layers.find(l => l.id === layerId);
+        if (!layer || !layer.canvas) return false;
+
+        const ctx = layer.ctx || layer.canvas.getContext('2d');
+        const imgData = ctx.getImageData(0, 0, layer.width, layer.height);
+        const data = imgData.data;
+        const w = layer.width, h = layer.height;
+
+        const threshold = options.threshold !== undefined ? options.threshold : 180;
+        const intensity = options.intensity !== undefined ? options.intensity : 0.6;
+
+        for (let i = 0; i < data.length; i += 4) {
+            if (data[i + 3] === 0) continue;
+            const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+            if (lum > threshold) {
+                const boost = (lum - threshold) * intensity;
+                data[i] = Math.min(255, data[i] + boost);
+                data[i + 1] = Math.min(255, data[i + 1] + boost);
+                data[i + 2] = Math.min(255, data[i + 2] + boost);
+            }
+        }
+
+        ctx.putImageData(imgData, 0, 0);
+        this.recordHistory('Filter: Bloom / Glow');
+        this.render();
+        return true;
+    }
+
+    // --- Blur Brush Tool (Mac BlurBrush parity) ---
+    applyBlurBrush(x, y, radius = 20, strength = 0.8, isMask = false) {
+        const layer = this.getActiveLayer();
+        if (!layer) return false;
+
+        const targetCanvas = isMask ? layer.maskCanvas : layer.canvas;
+        if (!targetCanvas) return false;
+        const targetCtx = targetCanvas.getContext('2d');
+
+        const r = Math.max(1, Math.round(radius));
+        const lx = Math.round(x - layer.x);
+        const ly = Math.round(y - layer.y);
+
+        const x0 = Math.max(0, lx - r);
+        const y0 = Math.max(0, ly - r);
+        const x1 = Math.min(layer.width, lx + r);
+        const y1 = Math.min(layer.height, ly + r);
+        const bw = x1 - x0;
+        const bh = y1 - y0;
+
+        if (bw <= 0 || bh <= 0) return false;
+
+        const patch = targetCtx.getImageData(x0, y0, bw, bh);
+        const pData = patch.data;
+        const copy = new Uint8Array(pData);
+
+        for (let py = 1; py < bh - 1; py++) {
+            for (let px = 1; px < bw - 1; px++) {
+                const dx = (x0 + px) - lx;
+                const dy = (y0 + py) - ly;
+                const distSq = dx * dx + dy * dy;
+                if (distSq > r * r) continue;
+
+                const falloff = (1 - Math.sqrt(distSq) / r) * strength;
+                const idx = (py * bw + px) * 4;
+
+                for (let c = 0; c < 4; c++) {
+                    let sum = 0;
+                    for (let ky = -1; ky <= 1; ky++) {
+                        for (let kx = -1; kx <= 1; kx++) {
+                            sum += copy[((py + ky) * bw + (px + kx)) * 4 + c];
+                        }
+                    }
+                    const avg = sum / 9;
+                    pData[idx + c] = Math.round(copy[idx + c] * (1 - falloff) + avg * falloff);
+                }
+            }
+        }
+
+        targetCtx.putImageData(patch, x0, y0);
+        this.render();
+        return true;
+    }
+
+    // --- Canvas Viewport Rotation (Mac CanvasRotation parity) ---
+    setCanvasRotation(angle) {
+        let norm = angle % 360;
+        if (norm > 180) norm -= 360;
+        if (norm < -180) norm += 360;
+
+        // Snapping within 5 degrees to 0, 90, -90, 180
+        const snapThreshold = 5;
+        for (const snap of [0, 90, -90, 180, -180]) {
+            if (Math.abs(norm - snap) <= snapThreshold) {
+                norm = snap;
+                break;
+            }
+        }
+
+        this.canvasRotation = norm;
+        this.render();
+        return this.canvasRotation;
+    }
+
+    getCanvasRotation() {
+        return this.canvasRotation || 0;
+    }
+
+    resetCanvasRotation() {
+        this.canvasRotation = 0;
+        this.render();
+        return 0;
+    }
+
+    // --- Oversized Layer Cropping (Mac CropToCanvasImport parity) ---
+    cropLayerToCanvas(layerId) {
+        const layer = this.layers.find(l => l.id === layerId);
+        if (!layer || !layer.canvas) return false;
+
+        const newX = Math.max(0, layer.x);
+        const newY = Math.max(0, layer.y);
+        const newW = Math.max(1, Math.min(this.width - newX, layer.width));
+        const newH = Math.max(1, Math.min(this.height - newY, layer.height));
+
+        const croppedCanvas = this.createCanvas(newW, newH);
+        const cCtx = croppedCanvas.getContext('2d');
+        cCtx.drawImage(layer.canvas, newX - layer.x, newY - layer.y, newW, newH, 0, 0, newW, newH);
+
+        layer.canvas = croppedCanvas;
+        layer.ctx = cCtx;
+        layer.x = newX;
+        layer.y = newY;
+        layer.width = newW;
+        layer.height = newH;
+        layer.croppedToCanvas = true;
+
+        this.recordHistory('Crop Layer to Canvas');
+        this.render();
+        return true;
+    }
+
+    // --- Mask Alone Mode (Mac MaskAlone parity) ---
+    setMaskAlone(layerId, alone = true) {
+        const layer = this.layers.find(l => l.id === layerId);
+        if (!layer || !layer.hasMask) {
+            this.isMaskAlone = false;
+            this.maskAloneLayerId = null;
+            this.render();
+            return false;
+        }
+
+        this.isMaskAlone = alone;
+        this.maskAloneLayerId = alone ? layerId : null;
+        this.render();
+        return this.isMaskAlone;
+    }
+
+    toggleMaskAlone(layerId) {
+        if (this.isMaskAlone && this.maskAloneLayerId === layerId) {
+            return this.setMaskAlone(layerId, false);
+        }
+        return this.setMaskAlone(layerId, true);
+    }
+
+    isMaskAloneMode() {
+        return !!this.isMaskAlone;
+    }
+
+    getMaskAloneLayer() {
+        return this.isMaskAlone ? this.layers.find(l => l.id === this.maskAloneLayerId) : null;
+    }
+
+    // --- Middle Mouse Pan & Navigation (Mac MiddleButton parity) ---
+    setPan(panX, panY) {
+        this.panX = panX;
+        this.panY = panY;
+        this.render();
+    }
+
+    getPan() {
+        return { x: this.panX || 0, y: this.panY || 0 };
+    }
+
+    startMiddlePan(x, y) {
+        this.isMiddlePanning = true;
+        this.middlePanStart = { x, y };
+        this.previousToolBeforePan = this.currentTool;
+    }
+
+    endMiddlePan() {
+        this.isMiddlePanning = false;
+        if (this.previousToolBeforePan) {
+            this.currentTool = this.previousToolBeforePan;
+            this.previousToolBeforePan = null;
+        }
+    }
+
+    middlePanDrag(deltaX, deltaY, isZoom = false) {
+        if (isZoom) {
+            // Drag up zooms in, drag down zooms out
+            const factor = 1 + (deltaY / 100);
+            this.zoom = Math.max(0.1, Math.min(32, (this.zoom || 1.0) * factor));
+        } else {
+            this.panX = (this.panX || 0) + deltaX;
+            this.panY = (this.panY || 0) + deltaY;
+        }
+        this.render();
+    }
+
+    // --- Snapping for Resizing (Mac ResizeSnap parity) ---
+    snappedResize(layerId, handle, point, options = {}) {
+        const layer = this.layers.find(l => l.id === layerId);
+        if (!layer) return point;
+
+        const tolerance = options.tolerance || 5;
+        const lockRatio = !!options.lockRatio;
+        let sx = point.x, sy = point.y;
+
+        // Snap to document edges (0, width, height)
+        if (Math.abs(sx - 0) <= tolerance) sx = 0;
+        if (Math.abs(sx - this.width) <= tolerance) sx = this.width;
+        if (Math.abs(sy - 0) <= tolerance) sy = 0;
+        if (Math.abs(sy - this.height) <= tolerance) sy = this.height;
+
+        // Snap to other layers' edges
+        for (const other of this.layers) {
+            if (other.id === layerId || !other.visible) continue;
+            if (Math.abs(sx - other.x) <= tolerance) sx = other.x;
+            if (Math.abs(sx - (other.x + other.width)) <= tolerance) sx = other.x + other.width;
+            if (Math.abs(sy - other.y) <= tolerance) sy = other.y;
+            if (Math.abs(sy - (other.y + other.height)) <= tolerance) sy = other.y + other.height;
+        }
+
+        if (lockRatio && layer.width > 0 && layer.height > 0) {
+            const aspect = layer.width / layer.height;
+            const newW = sx - layer.x;
+            const newH = sy - layer.y;
+            if (Math.abs(newW) > Math.abs(newH * aspect)) {
+                sy = layer.y + newW / aspect;
+            } else {
+                sx = layer.x + newH * aspect;
+            }
+        }
+
+        return { x: sx, y: sy };
+    }
+
+    // --- New Canvas Units & Presets (Mac NewCanvasUnit parity) ---
+    static unitToPixels(value, unit = 'pixels', resolution = 72) {
+        const num = parseFloat(String(value).replace(',', '.'));
+        if (isNaN(num) || num <= 0) return null;
+
+        switch (unit.toLowerCase()) {
+            case 'inches':
+            case 'in':
+                const inPx = Math.round(num * resolution);
+                return inPx > 30000 ? null : inPx;
+            case 'millimeters':
+            case 'mm':
+                const mmPx = Math.round((num / 25.4) * resolution);
+                return mmPx > 30000 ? null : mmPx;
+            case 'centimeters':
+            case 'cm':
+                const cmPx = Math.round((num / 2.54) * resolution);
+                return cmPx > 30000 ? null : cmPx;
+            case 'pixels':
+            case 'px':
+            default:
+                if (String(value).includes('.') || String(value).includes(',')) return null; // pixels must be whole
+                return num > 30000 ? null : Math.round(num);
+        }
+    }
+
+    static pixelsToUnitText(pixels, unit = 'pixels', resolution = 72) {
+        const fmt = (val) => {
+            const str = val.toFixed(2);
+            return str.replace(/\.00$/, '').replace(/(\.[1-9])0$/, '$1');
+        };
+        switch (unit.toLowerCase()) {
+            case 'inches':
+            case 'in':
+                return fmt(pixels / resolution);
+            case 'millimeters':
+            case 'mm':
+                return fmt((pixels / resolution) * 25.4);
+            case 'centimeters':
+            case 'cm':
+                return fmt((pixels / resolution) * 2.54);
+            case 'pixels':
+            case 'px':
+            default:
+                return String(Math.round(pixels));
+        }
     }
 
     // --- Export Pipeline ---

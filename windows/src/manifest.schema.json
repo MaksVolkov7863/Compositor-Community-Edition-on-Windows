@@ -270,6 +270,29 @@
                     "type": "number"
                   }
                 }
+              },
+              "colorOverlay": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "opacity": {
+                    "type": "number"
+                  },
+                  "blendMode": {
+                    "type": "string"
+                  },
+                  "red": {
+                    "type": "number"
+                  },
+                  "green": {
+                    "type": "number"
+                  },
+                  "blue": {
+                    "type": "number"
+                  }
+                }
               }
             }
           }

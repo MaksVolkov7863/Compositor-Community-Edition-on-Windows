@@ -1,8 +1,90 @@
 /**
- * PSDReader - Photoshop PSD (8BPS) Binary Format Parser and Fixture Builder
+ * PSDReader & PSDAdjustments - Photoshop PSD (8BPS) & PSB Large Document Binary Format Parser and Fixtures
  * 
- * Matches Swift PSDReader & PSDFixture (Compositor/Import/PSDReader.swift & PSDFixture.swift)
+ * Matches Swift PSDReader, PSDFixture & PSDAdjustments (Compositor/IO/PSD/*.swift)
  */
+
+class PSDAdjustments {
+    /**
+     * Parses Levels adjustment payload ('levl')
+     */
+    static levels(buf) {
+        if (!buf || buf.length < 20) return null;
+        const buffer = Buffer.isBuffer(buf) ? buf : Buffer.from(buf);
+        
+        // 29 records of 5 16-bit integers: [inputBlack, inputWhite, outputBlack, outputWhite, gammaHundredths]
+        const ranges = [];
+        let offset = 0;
+        for (let i = 0; i < 4; i++) {
+            if (offset + 10 > buffer.length) break;
+            const black = buffer.readUInt16BE(offset);
+            const white = buffer.readUInt16BE(offset + 2);
+            const outBlack = buffer.readUInt16BE(offset + 4);
+            const outWhite = buffer.readUInt16BE(offset + 6);
+            const gamma = buffer.readUInt16BE(offset + 8) / 100.0;
+            offset += 10;
+            ranges.push({
+                black,
+                white,
+                outputBlack: outBlack,
+                outputWhite: outWhite,
+                gamma: gamma || 1.0
+            });
+        }
+
+        return {
+            type: 'levels',
+            levels: {
+                ranges
+            }
+        };
+    }
+
+    /**
+     * Parses Hue/Saturation adjustment payload ('hue2' or 'hue ')
+     */
+    static hue(buf) {
+        if (!buf || buf.length < 6) return null;
+        const buffer = Buffer.isBuffer(buf) ? buf : Buffer.from(buf);
+
+        const version = buffer.readUInt16BE(0);
+        const colorize = buffer.readUInt8(2) === 1;
+
+        const masterHue = buffer.readInt16BE(6);
+        const masterSat = buffer.readInt16BE(8);
+        const masterLight = buffer.readInt16BE(10);
+
+        let redsAdj = { hue: 0, saturation: 0, lightness: 0 };
+        let redsBand = null;
+
+        if (buffer.length >= 26) {
+            const fStart = buffer.readInt16BE(12);
+            const rStart = buffer.readInt16BE(14);
+            const rEnd = buffer.readInt16BE(16);
+            const fEnd = buffer.readInt16BE(18);
+            const rHue = buffer.readInt16BE(20);
+            const rSat = buffer.readInt16BE(22);
+            const rLight = buffer.readInt16BE(24);
+
+            redsAdj = { hue: rHue, saturation: rSat, lightness: rLight };
+            redsBand = { falloffStart: fStart, rangeStart: rStart, rangeEnd: rEnd, falloffEnd: fEnd };
+        }
+
+        return {
+            type: 'hueSaturation',
+            hsvSettings: {
+                colorize,
+                adjustments: {
+                    master: { hue: masterHue, saturation: masterSat, lightness: masterLight },
+                    reds: redsAdj
+                },
+                bands: {
+                    reds: redsBand
+                }
+            }
+        };
+    }
+}
 
 class PSDReader {
     static get BLEND_KEYS() {
@@ -25,10 +107,11 @@ class PSDReader {
     }
 
     /**
-     * Parses an 8BPS Photoshop document binary buffer
+     * Parses an 8BPS Photoshop document binary buffer (PSD or PSB)
      * @param {Buffer|Uint8Array} buf
+     * @param {Object} [options] { remainingPixels, cropToCanvas }
      */
-    static read(buf) {
+    static read(buf, options = {}) {
         const buffer = Buffer.isBuffer(buf) ? buf : Buffer.from(buf);
         if (buffer.length < 4) {
             throw new Error('Invalid PSD: File too small');
@@ -47,6 +130,7 @@ class PSDReader {
         if (version !== 1 && version !== 2) {
             throw new Error(`Unsupported PSD version: ${version}`);
         }
+        const isPSB = version === 2;
 
         const channels = buffer.readUInt16BE(12);
         const height = buffer.readUInt32BE(14);
@@ -89,82 +173,125 @@ class PSDReader {
 
         // Layer and Mask Information Section
         const layers = [];
-        if (offset + 4 <= buffer.length) {
-            const layerSectionLen = buffer.readUInt32BE(offset);
-            offset += 4;
+        if (offset + (isPSB ? 8 : 4) <= buffer.length) {
+            const layerSectionLen = isPSB ? Number(buffer.readBigUInt64BE(offset)) : buffer.readUInt32BE(offset);
+            offset += (isPSB ? 8 : 4);
             const layerSectionEnd = offset + layerSectionLen;
-            if (layerSectionLen >= 4 && offset + 4 <= buffer.length) {
-                const layerInfoLen = buffer.readUInt32BE(offset);
-                offset += 4;
+            if (layerSectionLen >= (isPSB ? 8 : 4) && offset + (isPSB ? 8 : 4) <= buffer.length) {
+                const layerInfoLen = isPSB ? Number(buffer.readBigUInt64BE(offset)) : buffer.readUInt32BE(offset);
+                offset += (isPSB ? 8 : 4);
                 if (layerInfoLen > 0 && offset + 2 <= buffer.length) {
                     const layerCount = Math.abs(buffer.readInt16BE(offset));
                     offset += 2;
 
-                for (let i = 0; i < layerCount; i++) {
-                    if (offset + 34 > buffer.length) break;
-                    const top = buffer.readInt32BE(offset);
-                    const left = buffer.readInt32BE(offset + 4);
-                    const bottom = buffer.readInt32BE(offset + 8);
-                    const right = buffer.readInt32BE(offset + 12);
-                    const numChannels = buffer.readUInt16BE(offset + 16);
-                    offset += 18;
+                    for (let i = 0; i < layerCount; i++) {
+                        if (offset + 34 > buffer.length) break;
+                        const top = buffer.readInt32BE(offset);
+                        const left = buffer.readInt32BE(offset + 4);
+                        const bottom = buffer.readInt32BE(offset + 8);
+                        const right = buffer.readInt32BE(offset + 12);
+                        const numChannels = buffer.readUInt16BE(offset + 16);
+                        offset += 18;
 
-                    // Skip channel info (6 bytes per channel: 2 ID + 4 length)
-                    offset += numChannels * 6;
+                        // Skip channel info: 2 ID + (isPSB ? 8 : 4) length
+                        const chanLenSize = isPSB ? 8 : 4;
+                        offset += numChannels * (2 + chanLenSize);
 
-                    // Blend mode signature
-                    const blendSig = buffer.toString('utf8', offset, offset + 4);
-                    const blendKey = buffer.toString('utf8', offset + 4, offset + 8);
-                    const opacity = buffer.readUInt8(offset + 8) / 255;
-                    const clipping = buffer.readUInt8(offset + 9);
-                    const flags = buffer.readUInt8(offset + 10);
-                    const isVisible = (flags & 2) === 0; // bit 1: 0 = visible, 1 = hidden
-                    offset += 12;
+                        // Blend mode signature
+                        const blendSig = buffer.toString('utf8', offset, offset + 4);
+                        const blendKey = buffer.toString('utf8', offset + 4, offset + 8);
+                        const opacity = buffer.readUInt8(offset + 8) / 255;
+                        const clipping = buffer.readUInt8(offset + 9);
+                        const flags = buffer.readUInt8(offset + 10);
+                        const isVisible = (flags & 2) === 0; // bit 1: 0 = visible, 1 = hidden
+                        offset += 12;
 
-                    // Extra data
-                    const extraLen = buffer.readUInt32BE(offset);
-                    offset += 4;
-                    const extraEnd = offset + extraLen;
+                        // Extra data
+                        const extraLen = buffer.readUInt32BE(offset);
+                        offset += 4;
+                        const extraEnd = offset + extraLen;
 
-                    // Layer Mask Data length
-                    const maskLen = buffer.readUInt32BE(offset);
-                    offset += 4 + maskLen;
+                        // Layer Mask Data length
+                        const maskLen = buffer.readUInt32BE(offset);
+                        offset += 4 + maskLen;
 
-                    // Layer Blending Ranges length
-                    const blendRangeLen = buffer.readUInt32BE(offset);
-                    offset += 4 + blendRangeLen;
+                        // Layer Blending Ranges length
+                        const blendRangeLen = buffer.readUInt32BE(offset);
+                        offset += 4 + blendRangeLen;
 
-                    // Layer Name: Pascal string
-                    let layerName = `Layer ${i + 1}`;
-                    if (offset < extraEnd) {
-                        const nameByteLen = buffer.readUInt8(offset);
-                        offset += 1;
-                        if (nameByteLen > 0 && offset + nameByteLen <= buffer.length) {
-                            layerName = buffer.toString('utf8', offset, offset + nameByteLen);
-                            offset += nameByteLen;
+                        // Layer Name: Pascal string
+                        let layerName = `Layer ${i + 1}`;
+                        if (offset < extraEnd) {
+                            const nameByteLen = buffer.readUInt8(offset);
+                            offset += 1;
+                            if (nameByteLen > 0 && offset + nameByteLen <= buffer.length) {
+                                layerName = buffer.toString('utf8', offset, offset + nameByteLen);
+                                offset += nameByteLen;
+                            }
+                            if ((nameByteLen + 1) % 4 !== 0) {
+                                offset += 4 - ((nameByteLen + 1) % 4);
+                            }
                         }
+
+                        // Check for Adjustment Layer records ('8BIM') in remaining extra data
+                        let adjustment = null;
+                        while (offset + 12 <= extraEnd && offset + 12 <= buffer.length) {
+                            const adjSig = buffer.toString('utf8', offset, offset + 4);
+                            if (adjSig === '8BIM') {
+                                const adjKey = buffer.toString('utf8', offset + 4, offset + 8);
+                                const adjLen = buffer.readUInt32BE(offset + 8);
+                                offset += 12;
+                                const adjData = buffer.slice(offset, offset + adjLen);
+                                if (adjKey === 'levl') {
+                                    adjustment = PSDAdjustments.levels(adjData);
+                                } else if (adjKey === 'hue2' || adjKey === 'hue ') {
+                                    adjustment = PSDAdjustments.hue(adjData);
+                                }
+                                offset += adjLen;
+                                if (adjLen % 2 !== 0) offset++;
+                            } else {
+                                break;
+                            }
+                        }
+
+                        offset = extraEnd;
+
+                        let bounds = { x: left, y: top, width: Math.max(0, right - left), height: Math.max(0, bottom - top) };
+                        let croppedToCanvas = false;
+
+                        // Check remainingPixels / cropToCanvas budget
+                        const remaining = options.remainingPixels !== undefined ? options.remainingPixels : Infinity;
+                        const layerPixels = bounds.width * bounds.height;
+                        if (layerPixels > remaining || options.cropToCanvas) {
+                            croppedToCanvas = true;
+                            const newX = Math.max(0, bounds.x);
+                            const newY = Math.max(0, bounds.y);
+                            const newW = Math.min(width - newX, bounds.width);
+                            const newH = Math.min(height - newY, bounds.height);
+                            bounds = { x: newX, y: newY, width: Math.max(0, newW), height: Math.max(0, newH) };
+                        }
+
+                        layers.push({
+                            name: layerName,
+                            bounds,
+                            blendKey,
+                            blendMode: PSDReader.BLEND_KEYS[blendKey] || 'Normal',
+                            opacity: Math.max(0, Math.min(1, opacity)),
+                            isVisible,
+                            clipping: clipping === 1,
+                            adjustment,
+                            croppedToCanvas
+                        });
                     }
-
-                    offset = extraEnd;
-
-                    layers.push({
-                        name: layerName,
-                        bounds: { x: left, y: top, width: Math.max(0, right - left), height: Math.max(0, bottom - top) },
-                        blendKey,
-                        blendMode: PSDReader.BLEND_KEYS[blendKey] || 'Normal',
-                        opacity: Math.max(0, Math.min(1, opacity)),
-                        isVisible,
-                        clipping: clipping === 1
-                    });
                 }
             }
             offset = layerSectionEnd;
-        }
         }
 
         return {
             signature,
             version,
+            isPSB,
             channels,
             width,
             height,
@@ -188,7 +315,8 @@ class PSDReader {
             height: l.bounds.height,
             opacity: l.opacity,
             visible: l.isVisible,
-            blendMode: l.blendMode
+            blendMode: l.blendMode,
+            adjustment: l.adjustment || null
         }));
     }
 }
@@ -197,7 +325,8 @@ class PSDReader {
  * PSDFixture - Builder for valid 8BPS Photoshop binary buffers for tests
  */
 class PSDFixture {
-    static data(doc) {
+    static data(doc, options = {}) {
+        const isPSB = typeof options === 'boolean' ? options : (options && (options.largeDocument || options.isPSB));
         const width = doc.width || 8;
         const height = doc.height || 8;
         const resolution = doc.resolution || 72;
@@ -208,7 +337,7 @@ class PSDFixture {
         // 1. Header (26 bytes)
         const header = Buffer.alloc(26);
         header.write('8BPS', 0, 'utf8');
-        header.writeUInt16BE(1, 4); // version 1
+        header.writeUInt16BE(isPSB ? 2 : 1, 4); // version 1 (PSD) or 2 (PSB)
         header.fill(0, 6, 12);      // reserved 6 bytes
         header.writeUInt16BE(3, 12); // 3 channels (RGB)
         header.writeUInt32BE(height, 14);
@@ -237,7 +366,9 @@ class PSDFixture {
         parts.push(resBlock);
 
         // 4. Layer & Mask Information Section
+        const chanLenBytes = isPSB ? 8 : 4;
         const layerRecordsBufs = [];
+
         for (let i = 0; i < layers.length; i++) {
             const l = layers[i];
             const bounds = l.bounds || { x: 0, y: 0, width, height };
@@ -254,7 +385,7 @@ class PSDFixture {
             nameBuf.copy(nameField, 1, 0, nameLen);
 
             const extraLen = 4 + 4 + nameField.length; // mask (4) + blend ranges (4) + name
-            const rec = Buffer.alloc(18 + (3 * 6) + 12 + 4 + extraLen);
+            const rec = Buffer.alloc(18 + (3 * (2 + chanLenBytes)) + 12 + 4 + extraLen);
 
             let p = 0;
             rec.writeInt32BE(top, p); p += 4;
@@ -266,7 +397,11 @@ class PSDFixture {
             // Channels: Red (0), Green (1), Blue (2)
             for (let c = 0; c < 3; c++) {
                 rec.writeInt16BE(c, p); p += 2;
-                rec.writeUInt32BE(2, p); p += 4; // 2 bytes per channel (compression = 0)
+                if (isPSB) {
+                    rec.writeBigUInt64BE(2n, p); p += 8;
+                } else {
+                    rec.writeUInt32BE(2, p); p += 4; // 2 bytes per channel (compression = 0)
+                }
             }
 
             rec.write('8BIM', p, 'utf8'); p += 4;
@@ -287,13 +422,17 @@ class PSDFixture {
         }
 
         const layerRecordsData = Buffer.concat(layerRecordsBufs);
-        // Channel image dummy payloads (2 bytes compression: 0 raw)
         const channelPayloads = Buffer.alloc(layers.length * 3 * 2);
 
         const layerInfoLen = 2 + layerRecordsData.length + channelPayloads.length;
-        const layerInfoBuf = Buffer.alloc(4 + 2);
-        layerInfoBuf.writeUInt32BE(layerInfoLen, 0);
-        layerInfoBuf.writeInt16BE(layers.length, 4);
+        const layerInfoBuf = Buffer.alloc((isPSB ? 8 : 4) + 2);
+        if (isPSB) {
+            layerInfoBuf.writeBigUInt64BE(BigInt(layerInfoLen), 0);
+            layerInfoBuf.writeInt16BE(layers.length, 8);
+        } else {
+            layerInfoBuf.writeUInt32BE(layerInfoLen, 0);
+            layerInfoBuf.writeInt16BE(layers.length, 4);
+        }
 
         const totalLayerSection = Buffer.concat([
             layerInfoBuf,
@@ -301,8 +440,12 @@ class PSDFixture {
             channelPayloads
         ]);
 
-        const layerSectionHeader = Buffer.alloc(4);
-        layerSectionHeader.writeUInt32BE(totalLayerSection.length, 0);
+        const layerSectionHeader = Buffer.alloc(isPSB ? 8 : 4);
+        if (isPSB) {
+            layerSectionHeader.writeBigUInt64BE(BigInt(totalLayerSection.length), 0);
+        } else {
+            layerSectionHeader.writeUInt32BE(totalLayerSection.length, 0);
+        }
         parts.push(layerSectionHeader);
         parts.push(totalLayerSection);
 
@@ -316,5 +459,5 @@ class PSDFixture {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { PSDReader, PSDFixture };
+    module.exports = { PSDReader, PSDFixture, PSDAdjustments };
 }

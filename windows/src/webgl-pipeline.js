@@ -249,6 +249,12 @@ class WebGLPipeline {
         }
     }
 
+    applyAdjustment(imageData, type, options = {}) {
+        if (!imageData) return null;
+        const opts = typeof type === 'string' ? { [type]: true, ...options } : (type || {});
+        return this.applyAdjustments(imageData, opts);
+    }
+
     _cpuAdjustments(imageData, options) {
         const {
             brightness = 0,

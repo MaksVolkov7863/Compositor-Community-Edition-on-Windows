@@ -118,6 +118,12 @@ A standalone desktop version with full feature parity for Windows 10 and 11, mai
   npm install
   npm start
   ```
+- **Automated Test Suite & Feature Parity Guard**:
+  ```bash
+  cd windows
+  npm test          # Runs all 54 test suites (193 unit and regression tests)
+  npm run parity    # Verifies 100% feature parity against all 79 upstream macOS test suites
+  ```
 - **Packaging (Windows .exe installer & portable)**:
   ```bash
   cd windows

@@ -38,6 +38,10 @@ jobs:
         run: |
           npm test
 
+      - name: Run Upstream Feature Parity Audit
+        run: |
+          node scripts/parity-audit.js --ci
+
       - name: Build Windows Executable & Installer
         working-directory: windows
         run: |
