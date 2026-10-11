@@ -3,10 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; worker-src 'self' blob:">
     <title>Compositor</title>
     <link rel="stylesheet" href="app.css">
-    <!-- JSZip for .comp project packaging -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <!-- JSZip for .comp project packaging, bundled with the app (works offline) -->
+    <script src="../node_modules/jszip/dist/jszip.min.js"></script>
 </head>
 <body>
     <!-- Titlebar with Application Menus -->
@@ -312,6 +313,123 @@
             <div class="modal-footer">
                 <button class="btn btn-secondary" onclick="closeModal('modalNewCanvas')">Cancel</button>
                 <button class="btn btn-primary" onclick="confirmNewCanvas()">Create</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Canvas Size Dialog -->
+    <div class="modal-overlay" id="modalCanvasSize">
+        <div class="modal-dialog">
+            <div class="modal-header">
+                <span>Canvas Size</span>
+                <button class="modal-close-btn" onclick="closeModal('modalCanvasSize')">×</button>
+            </div>
+            <div class="modal-content">
+                <div class="form-row">
+                    <span class="form-label">Width:</span>
+                    <input type="number" id="canvasSizeWidth" class="form-control" value="1200" min="1" max="30000">
+                    <span>px</span>
+                </div>
+                <div class="form-row">
+                    <span class="form-label">Height:</span>
+                    <input type="number" id="canvasSizeHeight" class="form-control" value="800" min="1" max="30000">
+                    <span>px</span>
+                </div>
+                <div class="form-row">
+                    <span class="form-label">Anchor:</span>
+                    <select id="canvasSizeAnchor" class="form-control">
+                        <option value="center">Center</option>
+                        <option value="top-left">Top Left</option>
+                        <option value="top-right">Top Right</option>
+                        <option value="bottom-left">Bottom Left</option>
+                        <option value="bottom-right">Bottom Right</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('modalCanvasSize')">Cancel</button>
+                <button class="btn btn-primary" onclick="confirmCanvasSize()">Apply</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Image Size Dialog -->
+    <div class="modal-overlay" id="modalImageSize">
+        <div class="modal-dialog">
+            <div class="modal-header">
+                <span>Image Size</span>
+                <button class="modal-close-btn" onclick="closeModal('modalImageSize')">×</button>
+            </div>
+            <div class="modal-content">
+                <div class="form-row">
+                    <span class="form-label">Width:</span>
+                    <input type="number" id="imageSizeWidth" class="form-control" value="1200" min="1" max="30000" oninput="syncImageSize('width')">
+                    <span>px</span>
+                </div>
+                <div class="form-row">
+                    <span class="form-label">Height:</span>
+                    <input type="number" id="imageSizeHeight" class="form-control" value="800" min="1" max="30000" oninput="syncImageSize('height')">
+                    <span>px</span>
+                </div>
+                <div class="form-row">
+                    <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
+                        <input type="checkbox" id="imageSizeConstrain" checked>
+                        <span>Constrain proportions</span>
+                    </label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('modalImageSize')">Cancel</button>
+                <button class="btn btn-primary" onclick="confirmImageSize()">Apply</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Exposure Dialog -->
+    <div class="modal-overlay" id="modalExposure">
+        <div class="modal-dialog">
+            <div class="modal-header">
+                <span>Exposure</span>
+                <button class="modal-close-btn" onclick="closeModal('modalExposure')">×</button>
+            </div>
+            <div class="modal-content">
+                <div class="form-row">
+                    <span class="form-label">Exposure:</span>
+                    <input type="number" id="exposureVal" class="form-control" value="0" min="-5" max="5" step="0.1">
+                </div>
+                <div class="form-row">
+                    <span class="form-label">Offset:</span>
+                    <input type="number" id="exposureOffsetVal" class="form-control" value="0" min="-255" max="255" step="1">
+                </div>
+                <div class="form-row">
+                    <span class="form-label">Gamma:</span>
+                    <input type="number" id="exposureGammaVal" class="form-control" value="1.0" min="0.01" max="9.99" step="0.01">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('modalExposure')">Cancel</button>
+                <button class="btn btn-primary" onclick="confirmExposure()">Apply</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Feather / Expand / Contract Selection Dialog -->
+    <div class="modal-overlay" id="modalSelectionValue">
+        <div class="modal-dialog">
+            <div class="modal-header">
+                <span id="selectionValueTitle">Feather Selection</span>
+                <button class="modal-close-btn" onclick="closeModal('modalSelectionValue')">×</button>
+            </div>
+            <div class="modal-content">
+                <div class="form-row">
+                    <span class="form-label" id="selectionValueLabel">Radius:</span>
+                    <input type="number" id="selectionValueInput" class="form-control" value="5" min="1" max="500">
+                    <span>px</span>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('modalSelectionValue')">Cancel</button>
+                <button class="btn btn-primary" onclick="confirmSelectionValue()">OK</button>
             </div>
         </div>
     </div>
@@ -695,6 +813,12 @@
     </div>
 
     <!-- Scripts -->
+    <script src="engine/mock-canvas.js"></script>
+    <script src="engine/blend-modes.js"></script>
+    <script src="engine/filters.js"></script>
+    <script src="engine/transform.js"></script>
+    <script src="engine/layer-effects.js"></script>
+    <script src="engine/units.js"></script>
     <script src="engine.js"></script>
     <script src="project-store.js"></script>
     <script>
@@ -708,7 +832,7 @@
         engine.onActiveLayerChange = updateActiveLayerUI;
         engine.onHistoryChange = renderHistoryList;
         engine.onColorChange = updateSwatches;
-        engine.onZoomChange = updateDocInfo;
+        engine.onZoomChange = updateCanvasTransform;
         engine.onStatusChange = (msg) => document.getElementById('statusInfo').textContent = msg;
 
         // Viewport & Pan/Zoom
@@ -724,12 +848,21 @@
 
         function updateDocInfo() {
             document.getElementById('docInfo').textContent = `${engine.width} × ${engine.height} px | ${Math.round(engine.viewport.zoom * 100)}%`;
-            updateCanvasTransform();
         }
 
         // Mouse & Pointer Interactions on Viewport
         let isPanning = false;
         let startPan = { x: 0, y: 0 };
+        // Holding Space pans, as in Photoshop (MouseEvent has no "spaceKey" of its own)
+        let spaceHeld = false;
+        window.addEventListener('keydown', (e) => {
+            if (e.code === 'Space' && !['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) {
+                spaceHeld = true;
+                e.preventDefault();
+            }
+        });
+        window.addEventListener('keyup', (e) => { if (e.code === 'Space') spaceHeld = false; });
+        window.addEventListener('blur', () => { spaceHeld = false; });
 
         viewport.addEventListener('mousedown', (e) => {
             if (e.button === 1) e.preventDefault();
@@ -737,7 +870,7 @@
             const docX = (e.clientX - rect.left) / engine.viewport.zoom;
             const docY = (e.clientY - rect.top) / engine.viewport.zoom;
 
-            if (e.button === 1 || e.spaceKey || engine.currentTool === 'hand') {
+            if (e.button === 1 || spaceHeld || engine.currentTool === 'hand') {
                 isPanning = true;
                 startPan = { x: e.clientX - engine.viewport.panX, y: e.clientY - engine.viewport.panY };
                 viewport.style.cursor = 'grab';
@@ -1056,6 +1189,94 @@
             closeModal('modalNoise');
         }
 
+        function confirmCanvasSize() {
+            const w = parseInt(document.getElementById('canvasSizeWidth').value);
+            const h = parseInt(document.getElementById('canvasSizeHeight').value);
+            const anchor = document.getElementById('canvasSizeAnchor').value;
+            if (w > 0 && h > 0) {
+                engine.resizeCanvas(w, h, anchor);
+                updateCanvasTransform();
+            }
+            closeModal('modalCanvasSize');
+        }
+
+        function syncImageSize(changed) {
+            if (!document.getElementById('imageSizeConstrain').checked) return;
+            const wInput = document.getElementById('imageSizeWidth');
+            const hInput = document.getElementById('imageSizeHeight');
+            const ratio = engine.width / engine.height;
+            if (changed === 'width') hInput.value = Math.max(1, Math.round((parseInt(wInput.value) || 0) / ratio));
+            else wInput.value = Math.max(1, Math.round((parseInt(hInput.value) || 0) * ratio));
+        }
+
+        function confirmImageSize() {
+            const w = parseInt(document.getElementById('imageSizeWidth').value);
+            const h = parseInt(document.getElementById('imageSizeHeight').value);
+            if (w > 0 && h > 0) {
+                engine.resizeImage(w, h);
+                updateCanvasTransform();
+            }
+            closeModal('modalImageSize');
+        }
+
+        function openSizeModal(id) {
+            const prefix = id === 'modalCanvasSize' ? 'canvasSize' : 'imageSize';
+            document.getElementById(prefix + 'Width').value = engine.width;
+            document.getElementById(prefix + 'Height').value = engine.height;
+            openModal(id);
+        }
+
+        function confirmExposure() {
+            const exposure = parseFloat(document.getElementById('exposureVal').value) || 0;
+            const offset = parseFloat(document.getElementById('exposureOffsetVal').value) || 0;
+            const gamma = parseFloat(document.getElementById('exposureGammaVal').value) || 1.0;
+            engine.applyExposure(exposure, offset, gamma);
+            closeModal('modalExposure');
+        }
+
+        let selectionValueMode = 'feather';
+        function openSelectionValueModal(mode) {
+            if (!engine.selection) {
+                engine.notifyStatus('Make a selection first.');
+                return;
+            }
+            selectionValueMode = mode;
+            const titles = { feather: 'Feather Selection', expand: 'Expand Selection', contract: 'Contract Selection' };
+            document.getElementById('selectionValueTitle').textContent = titles[mode];
+            document.getElementById('selectionValueLabel').textContent = mode === 'feather' ? 'Radius:' : (mode === 'expand' ? 'Expand By:' : 'Contract By:');
+            openModal('modalSelectionValue');
+        }
+
+        function confirmSelectionValue() {
+            const value = Math.max(1, parseInt(document.getElementById('selectionValueInput').value) || 1);
+            let ok = true;
+            if (selectionValueMode === 'feather') {
+                if (engine.selection && engine.selection.mask) engine.featherSelection(value);
+                else ok = false;
+            } else {
+                ok = engine.growSelection(selectionValueMode === 'expand' ? value : -value);
+            }
+            if (!ok) engine.notifyStatus('This selection type cannot be refined yet. Use Marquee or Magic Wand.');
+            engine.render();
+            closeModal('modalSelectionValue');
+        }
+
+        function gradientMapFromSwatches() {
+            // Shadows map to the foreground color, highlights to the background color
+            const from = hexToRgb01(engine.foregroundColor);
+            const to = hexToRgb01(engine.backgroundColor);
+            const table = [];
+            for (let i = 0; i < 256; i++) {
+                const t = i / 255;
+                table.push({
+                    r: Math.round((from.r + (to.r - from.r) * t) * 255),
+                    g: Math.round((from.g + (to.g - from.g) * t) * 255),
+                    b: Math.round((from.b + (to.b - from.b) * t) * 255)
+                });
+            }
+            return table;
+        }
+
         function toggleTrimTolerance() {
             const selected = document.querySelector('input[name="trimBasedOn"]:checked')?.value;
             const tolRow = document.getElementById('trimToleranceRow');
@@ -1192,6 +1413,19 @@
                 case 'export-jpeg': handleExportJPEG(); break;
                 case 'undo': engine.undo(); break;
                 case 'redo': engine.redo(); break;
+                case 'cut':
+                    if (!engine.cutSelection()) engine.notifyStatus('Make a selection to cut.');
+                    break;
+                case 'copy':
+                    if (!engine.copySelection()) engine.notifyStatus('Make a selection to copy.');
+                    break;
+                case 'copy-merged': engine.copyMergedSelection(); engine.notifyStatus('Copied merged.'); break;
+                case 'paste':
+                    if (!engine.pasteSelection()) engine.notifyStatus('Nothing to paste.');
+                    break;
+                case 'fill-foreground': engine.fillActiveLayer(engine.foregroundColor); break;
+                case 'fill-background': engine.fillActiveLayer(engine.backgroundColor); break;
+                case 'group-layers': engine.addGroup(); break;
                 case 'free-transform': setTool('move'); break;
                 case 'new-layer': engine.addLayer(); break;
                 case 'duplicate-layer': engine.duplicateLayer(); break;
@@ -1203,14 +1437,17 @@
                 case 'layer-effects': openLayerEffectsModal(); break;
                 case 'flip-layer-h': engine.flipLayer(true); break;
                 case 'flip-layer-v': engine.flipLayer(false); break;
-                case 'canvas-size': openModal('modalCanvasSize'); break;
-                case 'image-size': openModal('modalImageSize'); break;
+                case 'canvas-size': openSizeModal('modalCanvasSize'); break;
+                case 'image-size': openSizeModal('modalImageSize'); break;
                 case 'image-trim': openModal('modalTrim'); break;
                 case 'flip-canvas-h': engine.flipCanvas(true); break;
                 case 'flip-canvas-v': engine.flipCanvas(false); break;
                 case 'select-all': engine.selectAll(); break;
                 case 'deselect': engine.deselect(); break;
                 case 'invert-selection': engine.invertSelection(); break;
+                case 'select-feather': openSelectionValueModal('feather'); break;
+                case 'select-expand': openSelectionValueModal('expand'); break;
+                case 'select-contract': openSelectionValueModal('contract'); break;
                 case 'content-aware-fill': engine.applyContentAwareFill(); break;
                 case 'filter-camera-raw': openModal('modalCameraRaw'); break;
                 case 'filter-levels':
@@ -1218,6 +1455,9 @@
                     renderHistogram();
                     break;
                 case 'filter-huesat': openModal('modalHueSat'); break;
+                case 'filter-curves': engine.notifyStatus('Curves is not available in the Windows edition yet.'); break;
+                case 'filter-exposure': openModal('modalExposure'); break;
+                case 'filter-gradient-map': engine.applyGradientMap(gradientMapFromSwatches()); break;
                 case 'filter-invert': engine.applyInvert(); break;
                 case 'filter-gaussian-blur': openModal('modalBlur'); break;
                 case 'filter-motion-blur': openModal('modalMotionBlur'); break;
@@ -1228,13 +1468,21 @@
                 case 'zoom-in': engine.zoomIn(); break;
                 case 'zoom-out': engine.zoomOut(); break;
                 case 'toggle-rulers':
-                    engine.showRulers = !engine.showRulers;
+                    engine.showRulers = typeof data === 'boolean' ? data : !engine.showRulers;
                     document.getElementById('rulerH').style.display = engine.showRulers ? 'block' : 'none';
                     document.getElementById('rulerV').style.display = engine.showRulers ? 'block' : 'none';
                     break;
                 case 'toggle-guides':
-                    engine.showGuides = !engine.showGuides;
+                    engine.showGuides = typeof data === 'boolean' ? data : !engine.showGuides;
                     engine.renderOverlay();
+                    break;
+                case 'toggle-grid':
+                    engine.showGrid = typeof data === 'boolean' ? data : !engine.showGrid;
+                    engine.renderOverlay();
+                    break;
+                case 'toggle-snap':
+                    engine.snapEnabled = typeof data === 'boolean' ? data : !engine.snapEnabled;
+                    engine.notifyStatus(engine.snapEnabled ? 'Snap on' : 'Snap off');
                     break;
                 case 'clear-guides':
                     engine.guides = { horizontal: [], vertical: [] };
@@ -1242,7 +1490,7 @@
                     break;
                 case 'keyboard-shortcuts': openModal('modalShortcuts'); break;
                 case 'about':
-                    alert("Compositor for Windows v1.0.0\nThe lightweight, focused Photoshop alternative.\nOriginal macOS version by Robbie Tilton.\nWindows port by MaksVolkov7863.");
+                    alert("Compositor for Windows v1.3.3\nThe lightweight, focused Photoshop alternative.\nOriginal macOS version by Robbie Tilton.\nWindows port by MaksVolkov7863.");
                     break;
             }
         }
@@ -1435,9 +1683,13 @@
                         e.preventDefault();
                         triggerAction('redo');
                         break;
-                    case 'n': e.preventDefault(); triggerAction('new-canvas'); break;
+                    case 'n': e.preventDefault(); triggerAction(shift ? 'new-layer' : 'new-canvas'); break;
                     case 'o': e.preventDefault(); triggerAction('open-file'); break;
-                    case 's': e.preventDefault(); triggerAction(shift ? 'save-as-project' : 'save-project'); break;
+                    case 's':
+                        e.preventDefault();
+                        if (shift && alt) triggerAction('export-jpeg');
+                        else triggerAction(shift ? 'save-as-project' : 'save-project');
+                        break;
                     case 'a': e.preventDefault(); triggerAction(shift ? 'filter-camera-raw' : 'select-all'); break;
                     case 'd': e.preventDefault(); triggerAction('deselect'); break;
                     case 't': e.preventDefault(); triggerAction('free-transform'); break;
@@ -1446,7 +1698,12 @@
                     case 'l': e.preventDefault(); triggerAction('filter-levels'); break;
                     case 'm': e.preventDefault(); triggerAction('filter-curves'); break;
                     case 'u': e.preventDefault(); triggerAction('filter-huesat'); break;
-                    case 'i': e.preventDefault(); triggerAction(shift ? 'invert-selection' : 'filter-invert'); break;
+                    case 'i':
+                        e.preventDefault();
+                        if (alt) triggerAction('image-size');
+                        else triggerAction(shift ? 'invert-selection' : 'filter-invert');
+                        break;
+                    case 'c': if (alt) { e.preventDefault(); triggerAction('canvas-size'); } break;
                     case '0': e.preventDefault(); triggerAction('zoom-fit'); break;
                     case '1': e.preventDefault(); triggerAction('zoom-100'); break;
                     case '=': case '+': e.preventDefault(); triggerAction('zoom-in'); break;
@@ -1473,14 +1730,16 @@
                     case 'z': document.querySelector('[data-tool="zoom"]').click(); break;
                     case 'x': swapColors(); break;
                     case 'd': resetColors(); break;
-                    case 'delete': triggerAction('delete-layer'); break;
+                    case 'delete': e.preventDefault(); triggerAction('delete-layer'); break;
                 }
             }
         });
 
         // Listen to Electron IPC menu actions & configure Windows 11 titleBarOverlay
         if (window.electronAPI) {
-            document.body.classList.add('has-titlebar-overlay');
+            if (navigator.windowControlsOverlay && navigator.windowControlsOverlay.visible) {
+                document.body.classList.add('has-titlebar-overlay');
+            }
             if (window.electronAPI.onMenuAction) {
                 window.electronAPI.onMenuAction((action, data) => triggerAction(action, data));
             }

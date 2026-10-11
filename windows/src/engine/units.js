@@ -2,6 +2,7 @@
  * Canvas Measurement Units & Physical DPI Conversions
  * Inches, millimeters, centimeters, pixels conversions.
  */
+(function (root) {
 
 function unitToPixels(value, unit = 'pixels', resolution = 72) {
     const num = parseFloat(String(value).replace(',', '.'));
@@ -50,7 +51,15 @@ function pixelsToUnitText(pixels, unit = 'pixels', resolution = 72) {
     }
 }
 
-module.exports = {
+const api = {
     unitToPixels,
     pixelsToUnitText
 };
+
+// CommonJS for Node tests; a global registry when loaded with a <script> tag in the renderer.
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = api;
+} else {
+    root.CompositorEngineModules = Object.assign(root.CompositorEngineModules || {}, api);
+}
+})(typeof globalThis !== 'undefined' ? globalThis : this);

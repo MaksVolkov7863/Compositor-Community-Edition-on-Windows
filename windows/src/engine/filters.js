@@ -2,6 +2,7 @@
  * Compositor Image Finishing & Retro Filter Pipelines
  * Vignette, Sharpen, Bloom/Glow, Scanlines, Dither, Blur Brush.
  */
+(function (root) {
 
 function applyDither(layer, methodOrOptions = 'bayer4', opt = {}) {
     if (!layer || !layer.canvas) return false;
@@ -310,7 +311,7 @@ function applyBlurBrush(targetCanvas, layerX, layerY, layerW, layerH, x, y, radi
     return true;
 }
 
-module.exports = {
+const api = {
     applyDither,
     applyScanlines,
     applyVignette,
@@ -318,3 +319,11 @@ module.exports = {
     applyBloomGlow,
     applyBlurBrush
 };
+
+// CommonJS for Node tests; a global registry when loaded with a <script> tag in the renderer.
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = api;
+} else {
+    root.CompositorEngineModules = Object.assign(root.CompositorEngineModules || {}, api);
+}
+})(typeof globalThis !== 'undefined' ? globalThis : this);

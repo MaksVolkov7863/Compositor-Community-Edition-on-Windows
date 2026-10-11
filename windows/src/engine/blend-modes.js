@@ -2,6 +2,7 @@
  * Blend Modes & Compositing Math
  * Photoshop-compatible blend mode definitions and canvas mapping.
  */
+(function (root) {
 
 const BLEND_MODES = [
     'Normal',
@@ -40,7 +41,15 @@ function mapBlendMode(mode) {
     }
 }
 
-module.exports = {
+const api = {
     BLEND_MODES,
     mapBlendMode
 };
+
+// CommonJS for Node tests; a global registry when loaded with a <script> tag in the renderer.
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = api;
+} else {
+    root.CompositorEngineModules = Object.assign(root.CompositorEngineModules || {}, api);
+}
+})(typeof globalThis !== 'undefined' ? globalThis : this);

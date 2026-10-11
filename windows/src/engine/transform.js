@@ -2,6 +2,7 @@
  * Transform, Snapping & Geometric Operations
  * Viewport rotation, handle snapping, layer cropping.
  */
+(function (root) {
 
 function normalizeRotation(angle) {
     let norm = angle % 360;
@@ -79,8 +80,16 @@ function cropLayerToCanvas(layer, canvasWidth, canvasHeight, createCanvas) {
     return true;
 }
 
-module.exports = {
+const api = {
     normalizeRotation,
     snappedResize,
     cropLayerToCanvas
 };
+
+// CommonJS for Node tests; a global registry when loaded with a <script> tag in the renderer.
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = api;
+} else {
+    root.CompositorEngineModules = Object.assign(root.CompositorEngineModules || {}, api);
+}
+})(typeof globalThis !== 'undefined' ? globalThis : this);

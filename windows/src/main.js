@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, dialog, ipcMain } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -24,9 +24,17 @@ function createWindow() {
         webPreferences: {
             preload: path.join(__dirname, 'preload.js'),
             nodeIntegration: false,
-            contextIsolation: true,
-            webSecurity: false // allow loading local image assets
+            contextIsolation: true
         }
+    });
+
+    // Dropping a file on the window or clicking a stray link must not replace the editor UI.
+    mainWindow.webContents.on('will-navigate', (event, url) => {
+        if (url !== mainWindow.webContents.getURL()) event.preventDefault();
+    });
+    mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+        if (/^https:\/\//.test(url)) shell.openExternal(url);
+        return { action: 'deny' };
     });
 
     mainWindow.loadFile(path.join(__dirname, 'index.html'));
@@ -164,8 +172,7 @@ function createApplicationMenu() {
             submenu: [
                 { label: 'About Compositor', click: () => sendAction('about') },
                 { label: 'GitHub Repository', click: () => {
-                    const { shell } = require('electron');
-                    shell.openExternal('https://github.com/MaksVolkov7863/Compositor');
+                    shell.openExternal('https://github.com/MaksVolkov7863/Compositor-Community-Edition-on-Windows');
                 }}
             ]
         }

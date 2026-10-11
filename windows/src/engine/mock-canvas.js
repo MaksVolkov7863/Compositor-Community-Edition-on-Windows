@@ -3,6 +3,7 @@
  * Provides Node.js CI test automation with 2D context emulation,
  * pixel buffer rasterization, paths, and composite operations.
  */
+(function (root) {
 
 function createMockCanvas(w, h) {
     w = Math.max(1, Math.round(w || 1));
@@ -397,7 +398,15 @@ function initHeadlessPolyfills() {
 
 initHeadlessPolyfills();
 
-module.exports = {
+const api = {
     createMockCanvas,
     initHeadlessPolyfills
 };
+
+// CommonJS for Node tests; a global registry when loaded with a <script> tag in the renderer.
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = api;
+} else {
+    root.CompositorEngineModules = Object.assign(root.CompositorEngineModules || {}, api);
+}
+})(typeof globalThis !== 'undefined' ? globalThis : this);

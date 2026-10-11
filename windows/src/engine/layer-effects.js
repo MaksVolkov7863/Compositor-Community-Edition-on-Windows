@@ -2,6 +2,7 @@
  * Layer Effects Pipeline
  * Inner Glow, Outer Glow, Color Overlay validation and rendering.
  */
+(function (root) {
 
 function validateOuterGlow(effect) {
     if (!effect || typeof effect !== 'object') return false;
@@ -32,8 +33,16 @@ function validateColorOverlay(effect) {
     return true;
 }
 
-module.exports = {
+const api = {
     validateOuterGlow,
     validateInnerGlow,
     validateColorOverlay
 };
+
+// CommonJS for Node tests; a global registry when loaded with a <script> tag in the renderer.
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = api;
+} else {
+    root.CompositorEngineModules = Object.assign(root.CompositorEngineModules || {}, api);
+}
+})(typeof globalThis !== 'undefined' ? globalThis : this);

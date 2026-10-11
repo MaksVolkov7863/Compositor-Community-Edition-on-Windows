@@ -23,7 +23,28 @@ const {
     validateColorOverlay: moduleValidateColorOverlay,
     unitToPixels: moduleUnitToPixels,
     pixelsToUnitText: modulePixelsToUnitText
-} = require('./engine/index');
+} = loadEngineSubmodules();
+
+// The renderer runs with contextIsolation and without nodeIntegration, so there is no
+// `require` there: index.html loads the engine/*.js files with <script> tags first and
+// they register themselves on globalThis.CompositorEngineModules. Node tests use require.
+function loadEngineSubmodules() {
+    if (typeof require === 'function') return require('./engine/index');
+    const modules = globalThis.CompositorEngineModules;
+    if (!modules || !modules.createMockCanvas) {
+        throw new Error('Compositor engine submodules are missing: load src/engine/*.js before engine.js');
+    }
+    return modules;
+}
+
+// Node-only helpers (TIFF, HEIC, file importers, Vision) are available in tests and in the
+// main process, but not in the sandboxed renderer. Fail with a clear message there.
+function requireNodeModule(modulePath, feature) {
+    if (typeof require !== 'function') {
+        throw new Error(`${feature} is not available in the Windows renderer yet`);
+    }
+    return require(modulePath);
+}
 
 class CompositorEngine {
     constructor(canvasElement, overlayElement) {
@@ -2112,6 +2133,10 @@ class CompositorEngine {
         if (this.onActiveLayerChange) this.onActiveLayerChange(this.getActiveLayer());
     }
 
+    notifyStatus(message) {
+        if (this.onStatusChange) this.onStatusChange(message);
+    }
+
     createCanvas(w, h) {
         if (!this.isHeadless && typeof window !== 'undefined' && typeof HTMLCanvasElement !== 'undefined' && typeof document !== 'undefined' && document.createElement) {
             const canvas = document.createElement('canvas');
@@ -3101,7 +3126,7 @@ class CompositorEngine {
         }
 
         const imgData = outCtx.getImageData(0, 0, this.width, this.height);
-        const { encodeTIFF } = require('./importers/tiff-importer');
+        const { encodeTIFF } = requireNodeModule('./importers/tiff-importer', 'TIFF export');
         const buffer = encodeTIFF(imgData.data, this.width, this.height);
 
         return {
@@ -3115,7 +3140,7 @@ class CompositorEngine {
     }
 
     async importImage(input, options = {}) {
-        const { ImageImporter } = require('./image-importer');
+        const { ImageImporter } = requireNodeModule('./image-importer', 'Image import');
         const imported = await ImageImporter.shared.decode(input, options);
         const layer = this.createLayer(imported.name || 'Imported Layer', imported.width, imported.height);
         layer.x = options.x !== undefined ? options.x : 0;
@@ -3141,7 +3166,7 @@ class CompositorEngine {
         const layer = this.getActiveLayer();
         if (!layer || !layer.canvas) return false;
 
-        const { VisionSegmentation, VisionFailure } = require('./vision-segmentation');
+        const { VisionSegmentation, VisionFailure } = requireNodeModule('./vision-segmentation', 'Select Subject');
         const ctx = layer.ctx || layer.canvas.getContext('2d');
         const imgData = ctx.getImageData(0, 0, layer.width, layer.height);
 
@@ -3202,7 +3227,7 @@ class CompositorEngine {
         const layer = this.getActiveLayer();
         if (!layer || !layer.canvas) return false;
 
-        const { VisionSegmentation } = require('./vision-segmentation');
+        const { VisionSegmentation } = requireNodeModule('./vision-segmentation', 'Remove Background');
         const ctx = layer.ctx || layer.canvas.getContext('2d');
         const imgData = ctx.getImageData(0, 0, layer.width, layer.height);
 
@@ -3294,6 +3319,94 @@ class CompositorEngine {
         this.render();
         this.notifyUI();
         return newLayer;
+    }
+
+    // Fill the active layer with a color, inside the selection when there is one.
+    fillActiveLayer(color) {
+        const layer = this.getActiveLayer();
+        if (!layer || !layer.ctx || layer.isGroup) return false;
+        const ctx = layer.ctx;
+        ctx.save();
+        ctx.fillStyle = color;
+        if (this.selection && this.selectionPath) {
+            ctx.translate(-layer.x, -layer.y);
+            ctx.fill(this.selectionPath, 'evenodd');
+        } else if (this.selection && this.selection.bounds) {
+            const b = this.selection.bounds;
+            ctx.fillRect(b.x - layer.x, b.y - layer.y, b.width, b.height);
+        } else {
+            ctx.fillRect(0, 0, layer.width, layer.height);
+        }
+        ctx.restore();
+        this.recordHistory('Fill');
+        this.render();
+        this.notifyUI();
+        return true;
+    }
+
+    // Copy Merged: the visible composite inside the selection (or the whole canvas).
+    copyMergedSelection() {
+        const bounds = (this.selection && this.selection.bounds) || { x: 0, y: 0, width: this.width, height: this.height };
+        const composite = this.createCanvas(this.width, this.height);
+        const compCtx = composite.getContext('2d');
+        for (const layer of this.layers) {
+            if (!layer.visible || layer.isGroup || !layer.canvas) continue;
+            compCtx.save();
+            compCtx.globalAlpha = layer.opacity !== undefined ? layer.opacity : 1.0;
+            compCtx.globalCompositeOperation = this.mapBlendMode(layer.blendMode);
+            compCtx.drawImage(layer.canvas, layer.x, layer.y);
+            compCtx.restore();
+        }
+        const clipCanvas = this.createCanvas(bounds.width, bounds.height);
+        clipCanvas.getContext('2d').drawImage(composite, bounds.x, bounds.y, bounds.width, bounds.height, 0, 0, bounds.width, bounds.height);
+        this.clipboard = { width: bounds.width, height: bounds.height, canvas: clipCanvas, x: bounds.x, y: bounds.y };
+        return this.clipboard;
+    }
+
+    // Expand (radius > 0) or contract (radius < 0) a mask-based selection.
+    growSelection(radius) {
+        if (!this.selection || !this.selection.mask || !radius) return false;
+        const w = this.selection.width, h = this.selection.height;
+        const src = this.selection.mask;
+        const r = Math.round(Math.abs(radius));
+        const expand = radius > 0;
+        const pass = (input, horizontal) => {
+            const out = new Uint8Array(w * h);
+            for (let y = 0; y < h; y++) {
+                for (let x = 0; x < w; x++) {
+                    let v = expand ? 0 : 255;
+                    for (let k = -r; k <= r; k++) {
+                        const nx = horizontal ? x + k : x;
+                        const ny = horizontal ? y : y + k;
+                        const inside = nx >= 0 && ny >= 0 && nx < w && ny < h;
+                        const sample = inside ? input[ny * w + nx] : 0;
+                        v = expand ? Math.max(v, sample) : Math.min(v, sample);
+                    }
+                    out[y * w + x] = v;
+                }
+            }
+            return out;
+        };
+        const mask = pass(pass(src, true), false);
+        let minX = w, minY = h, maxX = -1, maxY = -1;
+        for (let y = 0; y < h; y++) {
+            for (let x = 0; x < w; x++) {
+                if (mask[y * w + x] > 0) {
+                    if (x < minX) minX = x;
+                    if (x > maxX) maxX = x;
+                    if (y < minY) minY = y;
+                    if (y > maxY) maxY = y;
+                }
+            }
+        }
+        if (maxX < 0) {
+            this.deselect();
+            return true;
+        }
+        this.selection = { type: 'mask', mask, width: w, height: h, bounds: { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 } };
+        this.createPathFromMask(mask, w, h);
+        this.render();
+        return true;
     }
 
     featherSelection(radius = 5) {
