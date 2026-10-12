@@ -27,6 +27,9 @@
                         <div class="dropdown-divider"></div>
                         <div class="dropdown-item" onclick="triggerAction('export-png')">Export PNG…<span class="shortcut">Ctrl+Shift+E</span></div>
                         <div class="dropdown-item" onclick="triggerAction('export-jpeg')">Export JPEG…<span class="shortcut">Ctrl+Alt+Shift+S</span></div>
+                        <div class="dropdown-item" onclick="triggerAction('export-tiff')">Export TIFF…</div>
+                        <div class="dropdown-divider"></div>
+                        <div class="dropdown-item" onclick="triggerAction('close-tab')">Close Tab<span class="shortcut">Ctrl+W</span></div>
                     </div>
                 </div>
                 <div class="menu-item" data-menu="edit">Edit
@@ -44,6 +47,7 @@
                         <div class="dropdown-item" onclick="triggerAction('fill-background')">Fill Background<span class="shortcut">Ctrl+Del</span></div>
                         <div class="dropdown-item" onclick="triggerAction('content-aware-fill')">Content-Aware Fill…<span class="shortcut">Shift+F5</span></div>
                         <div class="dropdown-divider"></div>
+                        <div class="dropdown-item" onclick="triggerAction('command-palette')">Command Palette…<span class="shortcut">Ctrl+F</span></div>
                         <div class="dropdown-item" onclick="triggerAction('keyboard-shortcuts')">Keyboard Shortcuts…</div>
                     </div>
                 </div>
@@ -85,6 +89,11 @@
                         <div class="dropdown-item" onclick="triggerAction('select-all')">All<span class="shortcut">Ctrl+A</span></div>
                         <div class="dropdown-item" onclick="triggerAction('deselect')">Deselect<span class="shortcut">Ctrl+D</span></div>
                         <div class="dropdown-item" onclick="triggerAction('invert-selection')">Inverse<span class="shortcut">Ctrl+Shift+I</span></div>
+                        <div class="dropdown-item" onclick="triggerAction('select-subject')">Subject<span class="shortcut">Ctrl+Alt+A</span></div>
+                        <div class="dropdown-divider"></div>
+                        <div class="dropdown-item" onclick="triggerAction('select-feather')">Feather…</div>
+                        <div class="dropdown-item" onclick="triggerAction('select-expand')">Expand…</div>
+                        <div class="dropdown-item" onclick="triggerAction('select-contract')">Contract…</div>
                     </div>
                 </div>
                 <div class="menu-item" data-menu="filter">Filter
@@ -96,6 +105,9 @@
                         <div class="dropdown-item" onclick="triggerAction('filter-add-noise')">Add Noise…</div>
                         <div class="dropdown-item" onclick="triggerAction('filter-film-grain')">Film Grain…</div>
                         <div class="dropdown-item" onclick="triggerAction('filter-exposure')">Exposure…</div>
+                        <div class="dropdown-item" onclick="triggerAction('filter-gradient-map')">Gradient Map</div>
+                        <div class="dropdown-divider"></div>
+                        <div class="dropdown-item" onclick="triggerAction('remove-background')">Remove Background</div>
                     </div>
                 </div>
                 <div class="menu-item" data-menu="view">View
@@ -105,8 +117,15 @@
                         <div class="dropdown-item" onclick="triggerAction('zoom-in')">Zoom In<span class="shortcut">Ctrl+=</span></div>
                         <div class="dropdown-item" onclick="triggerAction('zoom-out')">Zoom Out<span class="shortcut">Ctrl+-</span></div>
                         <div class="dropdown-divider"></div>
-                        <div class="dropdown-item" onclick="triggerAction('toggle-rulers')">Toggle Rulers<span class="shortcut">Ctrl+R</span></div>
-                        <div class="dropdown-item" onclick="triggerAction('toggle-guides')">Toggle Guides<span class="shortcut">Ctrl+;</span></div>
+                        <div class="dropdown-item" data-check="rulers" onclick="triggerAction('toggle-rulers')">Rulers<span class="shortcut">Ctrl+R</span></div>
+                        <div class="dropdown-item" data-check="guides" onclick="triggerAction('toggle-guides')">Guides<span class="shortcut">Ctrl+;</span></div>
+                        <div class="dropdown-item" data-check="grid" onclick="triggerAction('toggle-grid')">Show Grid<span class="shortcut">Ctrl+'</span></div>
+                        <div class="dropdown-item" onclick="triggerAction('grid-settings')">Grid Settings…</div>
+                        <div class="dropdown-divider"></div>
+                        <div class="dropdown-item" data-check="snap" onclick="triggerAction('toggle-snap')">Snap</div>
+                        <div class="dropdown-item" data-check="snapGrid" onclick="triggerAction('toggle-snap-grid')">Snap To Grid</div>
+                        <div class="dropdown-divider"></div>
+                        <div class="dropdown-item" data-check="navigator" onclick="triggerAction('toggle-navigator')">Navigator</div>
                         <div class="dropdown-item" onclick="triggerAction('clear-guides')">Clear Guides</div>
                     </div>
                 </div>
@@ -819,8 +838,23 @@
     <script src="engine/transform.js"></script>
     <script src="engine/layer-effects.js"></script>
     <script src="engine/units.js"></script>
+    <script src="engine/selection-mask.js"></script>
+    <script src="layout-grid.js"></script>
+    <script src="curves.js"></script>
     <script src="engine.js"></script>
     <script src="project-store.js"></script>
+    <script src="vision-segmentation.js"></script>
+    <script src="command-palette.js"></script>
+    <script src="navigator.js"></script>
+    <script src="project-tab-layout.js"></script>
+    <script src="cursor-manager.js"></script>
+    <script src="floating-panel.js"></script>
+    <script src="downsample-cache.js"></script>
+    <script src="ui/curves-dialog.js"></script>
+    <script src="ui/grid-overlay.js"></script>
+    <script src="ui/navigator-minimap.js"></script>
+    <script src="ui/command-palette-ui.js"></script>
+    <script src="ui/document-tabs.js"></script>
     <script>
         // Initialize Engine
         const mainCanvas = document.getElementById('mainCanvas');
@@ -844,6 +878,22 @@
             canvasContainer.style.height = engine.height + 'px';
             canvasContainer.style.transform = `translate(${engine.viewport.panX}px, ${engine.viewport.panY}px) scale(${engine.viewport.zoom})`;
             updateDocInfo();
+            if (window.GridOverlay) GridOverlay.redraw();
+            if (window.NavigatorPanel) NavigatorPanel.update();
+        }
+
+        // View menu checkmarks, in the titlebar menu and the native one alike
+        function syncViewState() {
+            const state = {
+                rulers: !!engine.showRulers, guides: !!engine.showGuides, grid: !!engine.showGrid,
+                snap: !!engine.snapEnabled, snapGrid: !!engine.snapToGrid,
+                navigator: !!(window.NavigatorPanel && NavigatorPanel.isShown)
+            };
+            for (const item of document.querySelectorAll('.dropdown-item[data-check]')) {
+                item.classList.toggle('checked', !!state[item.dataset.check]);
+            }
+            if (window.electronAPI && window.electronAPI.setMenuState) window.electronAPI.setMenuState(state);
+            return state;
         }
 
         function updateDocInfo() {
@@ -904,7 +954,7 @@
         window.addEventListener('mouseup', () => {
             if (isPanning) {
                 isPanning = false;
-                viewport.style.cursor = 'default';
+                applyToolCursor();
             }
             engine.pointerUp();
         });
@@ -933,7 +983,18 @@
             });
         });
 
+        const cursorManager = new CursorManager();
+        function applyToolCursor() {
+            cursorManager.updateCursor();
+            const c = cursorManager.currentCursor;
+            viewport.style.cursor = c.startsWith('circle-') ? 'crosshair' : c;
+        }
+        viewport.addEventListener('mouseenter', () => { cursorManager.mouseEnterCanvas(); applyToolCursor(); });
+        viewport.addEventListener('mouseleave', () => { cursorManager.mouseLeaveCanvas(); applyToolCursor(); });
+
         function setTool(toolName) {
+            cursorManager.setTool(toolName);
+            applyToolCursor();
             engine.currentTool = toolName;
             renderToolOptions();
             engine.renderOverlay();
@@ -1157,8 +1218,11 @@
             const w = parseInt(document.getElementById('newCanvasWidth').value);
             const h = parseInt(document.getElementById('newCanvasHeight').value);
             const bg = document.getElementById('newCanvasBg').value;
-            engine.newCanvas(w, h, bg);
             closeModal('modalNewCanvas');
+            DocumentTabs.open(null, null, () => {
+                engine.newCanvas(w, h, bg);
+                engine.fitToScreen();
+            });
         }
 
         function confirmLevels() {
@@ -1251,12 +1315,11 @@
             const value = Math.max(1, parseInt(document.getElementById('selectionValueInput').value) || 1);
             let ok = true;
             if (selectionValueMode === 'feather') {
-                if (engine.selection && engine.selection.mask) engine.featherSelection(value);
-                else ok = false;
+                ok = engine.featherSelection(value);
             } else {
                 ok = engine.growSelection(selectionValueMode === 'expand' ? value : -value);
             }
-            if (!ok) engine.notifyStatus('This selection type cannot be refined yet. Use Marquee or Magic Wand.');
+            if (!ok) engine.notifyStatus('Make a selection first.');
             engine.render();
             closeModal('modalSelectionValue');
         }
@@ -1411,6 +1474,17 @@
                 case 'save-as-project': handleSaveProject(true); break;
                 case 'export-png': handleExportPNG(); break;
                 case 'export-jpeg': handleExportJPEG(); break;
+                case 'export-tiff': handleExportTIFF(); break;
+                case 'close-tab': DocumentTabs.close(); break;
+                case 'command-palette': CommandPalette.toggle(); break;
+                case 'grid-settings': GridOverlay.openSettings(); break;
+                case 'toggle-navigator': NavigatorPanel.toggle(); break;
+                case 'toggle-snap-grid':
+                    engine.snapToGrid = typeof data === 'boolean' ? data : !engine.snapToGrid;
+                    if (engine.snapToGrid && !engine.showGrid) engine.showGrid = true;
+                    GridOverlay.save();
+                    GridOverlay.redraw();
+                    break;
                 case 'undo': engine.undo(); break;
                 case 'redo': engine.redo(); break;
                 case 'cut':
@@ -1445,6 +1519,8 @@
                 case 'select-all': engine.selectAll(); break;
                 case 'deselect': engine.deselect(); break;
                 case 'invert-selection': engine.invertSelection(); break;
+                case 'select-subject': runVision('select'); break;
+                case 'remove-background': runVision('remove'); break;
                 case 'select-feather': openSelectionValueModal('feather'); break;
                 case 'select-expand': openSelectionValueModal('expand'); break;
                 case 'select-contract': openSelectionValueModal('contract'); break;
@@ -1455,7 +1531,7 @@
                     renderHistogram();
                     break;
                 case 'filter-huesat': openModal('modalHueSat'); break;
-                case 'filter-curves': engine.notifyStatus('Curves is not available in the Windows edition yet.'); break;
+                case 'filter-curves': CurvesDialog.open(); break;
                 case 'filter-exposure': openModal('modalExposure'); break;
                 case 'filter-gradient-map': engine.applyGradientMap(gradientMapFromSwatches()); break;
                 case 'filter-invert': engine.applyInvert(); break;
@@ -1478,7 +1554,7 @@
                     break;
                 case 'toggle-grid':
                     engine.showGrid = typeof data === 'boolean' ? data : !engine.showGrid;
-                    engine.renderOverlay();
+                    GridOverlay.redraw();
                     break;
                 case 'toggle-snap':
                     engine.snapEnabled = typeof data === 'boolean' ? data : !engine.snapEnabled;
@@ -1493,6 +1569,7 @@
                     alert("Compositor for Windows v1.3.3\nThe lightweight, focused Photoshop alternative.\nOriginal macOS version by Robbie Tilton.\nWindows port by MaksVolkov7863.");
                     break;
             }
+            syncViewState();
         }
 
         // Render Histogram in Levels Dialog
@@ -1520,21 +1597,68 @@
         }
 
         // File Dialog Operations via Electron IPC or HTML5
+        const NODE_DECODED_EXTENSIONS = ['tif', 'tiff', 'heic', 'heif', 'psd', 'psb'];
+        const extensionOf = (p) => (p.split('.').pop() || '').toLowerCase();
+        const baseName = (p) => p.split(/[\\/]/).pop();
+
+        // An image file as a canvas: Chromium decodes PNG/JPEG/WebP/BMP, the main process the rest.
+        async function decodeImageFile(filePath) {
+            if (NODE_DECODED_EXTENSIONS.includes(extensionOf(filePath))) {
+                const res = await window.electronAPI.decodeImage(filePath);
+                if (!res.success) throw new Error(res.error || 'Unreadable image');
+                const canvas = document.createElement('canvas');
+                canvas.width = res.width;
+                canvas.height = res.height;
+                const rgba = new Uint8ClampedArray(res.data.buffer || res.data, res.data.byteOffset || 0, res.width * res.height * 4);
+                canvas.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(rgba), res.width, res.height), 0, 0);
+                return canvas;
+            }
+            const readRes = await window.electronAPI.readFile(filePath);
+            if (!readRes.success) throw new Error(readRes.error);
+            const mime = { jpg: 'jpeg', jpeg: 'jpeg', webp: 'webp', bmp: 'bmp', svg: 'svg+xml' }[extensionOf(filePath)] || 'png';
+            return await loadImageElement(`data:image/${mime};base64,${readRes.data}`);
+        }
+
+        function loadImageElement(src) {
+            return new Promise((resolve, reject) => {
+                const img = new Image();
+                img.onload = () => resolve(img);
+                img.onerror = () => reject(new Error('Unreadable image'));
+                img.src = src;
+            });
+        }
+
+        function documentFromImage(image) {
+            engine.newCanvas(image.width, image.height, 'transparent');
+            const baseLayer = engine.getActiveLayer();
+            baseLayer.ctx.drawImage(image, 0, 0);
+            engine.recordHistory('Open');
+            engine.fitToScreen();
+            engine.render();
+            engine.notifyUI();
+        }
+
+        async function openPath(filePath) {
+            try {
+                if (extensionOf(filePath) === 'comp') {
+                    const readRes = await window.electronAPI.readFile(filePath);
+                    if (!readRes.success) throw new Error(readRes.error);
+                    const project = await ProjectStore.deserializeProject(readRes.data, window.JSZip);
+                    DocumentTabs.open(baseName(filePath), filePath, () => loadProjectIntoEngine(project));
+                } else {
+                    const image = await decodeImageFile(filePath);
+                    DocumentTabs.open(baseName(filePath), null, () => documentFromImage(image));
+                }
+                engine.notifyStatus(`Opened ${baseName(filePath)}`);
+            } catch (err) {
+                engine.notifyStatus(`Couldn't open ${baseName(filePath)}: ${err.message}`);
+            }
+        }
+
         async function handleOpenFile() {
             if (window.electronAPI) {
                 const res = await window.electronAPI.openFileDialog();
-                if (!res.canceled && res.filePaths.length > 0) {
-                    const filePath = res.filePaths[0];
-                    const readRes = await window.electronAPI.readFile(filePath);
-                    if (readRes.success) {
-                        if (filePath.endsWith('.comp')) {
-                            const project = await ProjectStore.deserializeProject(readRes.data, window.JSZip);
-                            loadProjectIntoEngine(project);
-                        } else {
-                            loadBase64Image(readRes.data);
-                        }
-                    }
-                }
+                if (!res.canceled && res.filePaths.length > 0) await openPath(res.filePaths[0]);
             } else {
                 const input = document.createElement('input');
                 input.type = 'file';
@@ -1547,19 +1671,40 @@
                         if (file.name.endsWith('.comp')) {
                             const base64 = evt.target.result.split(',')[1];
                             const project = await ProjectStore.deserializeProject(base64, window.JSZip);
-                            loadProjectIntoEngine(project);
+                            DocumentTabs.open(file.name, null, () => loadProjectIntoEngine(project));
                         } else {
-                            loadBase64Image(evt.target.result);
+                            const image = await loadImageElement(evt.target.result);
+                            DocumentTabs.open(file.name, null, () => documentFromImage(image));
                         }
                     };
-                    if (file.name.endsWith('.comp')) reader.readAsDataURL(file);
-                    else reader.readAsDataURL(file);
+                    reader.readAsDataURL(file);
                 };
                 input.click();
             }
         }
 
         async function handleImportImage() {
+            const addLayerFrom = (image, name) => {
+                const layer = engine.addLayer(name, image.width, image.height);
+                layer.ctx.drawImage(image, 0, 0);
+                engine.recordHistory('Import Image');
+                engine.render();
+                engine.notifyUI();
+            };
+            if (window.electronAPI) {
+                const res = await window.electronAPI.openFileDialog({
+                    title: 'Import Image',
+                    filters: [{ name: 'Images (PNG, JPEG, WebP, TIFF, HEIC, PSD)', extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'tif', 'tiff', 'heic', 'heif', 'psd', 'psb'] }]
+                });
+                if (res.canceled || !res.filePaths.length) return;
+                const filePath = res.filePaths[0];
+                try {
+                    addLayerFrom(await decodeImageFile(filePath), baseName(filePath));
+                } catch (err) {
+                    engine.notifyStatus(`Couldn't import ${baseName(filePath)}: ${err.message}`);
+                }
+                return;
+            }
             const input = document.createElement('input');
             input.type = 'file';
             input.accept = 'image/*';
@@ -1567,29 +1712,14 @@
                 const file = e.target.files[0];
                 if (!file) return;
                 const reader = new FileReader();
-                reader.onload = (evt) => {
-                    const img = new Image();
-                    img.onload = () => {
-                        const layer = engine.addLayer(file.name);
-                        layer.ctx.drawImage(img, 0, 0);
-                        engine.render();
-                    };
-                    img.src = evt.target.result;
-                };
+                reader.onload = async (evt) => addLayerFrom(await loadImageElement(evt.target.result), file.name);
                 reader.readAsDataURL(file);
             };
             input.click();
         }
 
         function loadBase64Image(dataOrUrl) {
-            const img = new Image();
-            img.onload = () => {
-                engine.newCanvas(img.width, img.height, 'transparent');
-                const baseLayer = engine.getActiveLayer();
-                baseLayer.ctx.drawImage(img, 0, 0);
-                engine.render();
-            };
-            img.src = dataOrUrl.startsWith('data:') ? dataOrUrl : `data:image/png;base64,${dataOrUrl}`;
+            loadImageElement(dataOrUrl.startsWith('data:') ? dataOrUrl : `data:image/png;base64,${dataOrUrl}`).then(documentFromImage);
         }
 
         function loadProjectIntoEngine(project) {
@@ -1605,12 +1735,15 @@
             engine.canvas.height = project.height;
             engine.overlay.width = project.width;
             engine.overlay.height = project.height;
+            engine.history = [];
+            engine.historyIndex = -1;
+            engine.recordHistory('Open');
             engine.fitToScreen();
             engine.render();
             engine.notifyUI();
         }
 
-        async function handleSaveProject() {
+        async function handleSaveProject(saveAs = false) {
             const zipBase64 = await ProjectStore.serializeProject({
                 width: engine.width,
                 height: engine.height,
@@ -1621,19 +1754,62 @@
             }, window.JSZip);
 
             if (window.electronAPI) {
-                const saveRes = await window.electronAPI.saveFileDialog({
-                    defaultPath: 'Artwork.comp',
-                    filters: [{ name: 'Compositor Project (*.comp)', extensions: ['comp'] }]
-                });
-                if (!saveRes.canceled && saveRes.filePath) {
-                    await window.electronAPI.writeFile(saveRes.filePath, zipBase64);
+                const tab = DocumentTabs.active;
+                let filePath = !saveAs && tab && tab.filePath && extensionOf(tab.filePath) === 'comp' ? tab.filePath : null;
+                if (!filePath) {
+                    const title = tab ? tab.title.replace(/\.[^.]+$/, '') : 'Artwork';
+                    const saveRes = await window.electronAPI.saveFileDialog({
+                        defaultPath: title + '.comp',
+                        filters: [{ name: 'Compositor Project (*.comp)', extensions: ['comp'] }]
+                    });
+                    if (saveRes.canceled || !saveRes.filePath) return;
+                    filePath = saveRes.filePath;
+                }
+                const writeRes = await window.electronAPI.writeFile(filePath, zipBase64);
+                if (writeRes.success) {
+                    DocumentTabs.setFile(filePath, baseName(filePath));
                     engine.notifyStatus('Project saved successfully.');
+                } else {
+                    engine.notifyStatus(`Couldn't save: ${writeRes.error}`);
                 }
             } else {
                 const a = document.createElement('a');
                 a.href = 'data:application/zip;base64,' + zipBase64;
                 a.download = 'Artwork.comp';
                 a.click();
+            }
+        }
+
+        // The visible composite as RGBA, for TIFF export in the main process
+        async function handleExportTIFF() {
+            if (!window.electronAPI || !window.electronAPI.exportTIFF) return;
+            const img = engine.ctx.getImageData(0, 0, engine.width, engine.height);
+            const tab = DocumentTabs.active;
+            const res = await window.electronAPI.exportTIFF({
+                width: engine.width, height: engine.height, rgba: img.data.buffer,
+                defaultPath: (tab ? tab.title.replace(/\.[^.]+$/, '') : 'Compositor_Export') + '.tif'
+            });
+            if (res.success) engine.notifyStatus('Exported TIFF.');
+            else if (!res.canceled) engine.notifyStatus(`Couldn't export TIFF: ${res.error}`);
+        }
+
+        // Select > Subject and Filter > Remove Background (local saliency segmentation, see vision-segmentation.js)
+        async function runVision(mode) {
+            const layer = engine.getActiveLayer();
+            if (!layer || !layer.ctx || layer.isGroup) {
+                engine.notifyStatus('Select a pixel layer first.');
+                return false;
+            }
+            engine.notifyStatus(mode === 'select' ? 'Selecting subject…' : 'Removing background…');
+            await new Promise(r => setTimeout(r, 0));
+            try {
+                if (mode === 'select') await engine.selectSubject();
+                else await engine.removeBackground();
+                engine.notifyStatus(mode === 'select' ? 'Subject selected.' : 'Background removed with a layer mask.');
+                return true;
+            } catch (err) {
+                engine.notifyStatus(err.message);
+                return false;
             }
         }
 
@@ -1690,7 +1866,10 @@
                         if (shift && alt) triggerAction('export-jpeg');
                         else triggerAction(shift ? 'save-as-project' : 'save-project');
                         break;
-                    case 'a': e.preventDefault(); triggerAction(shift ? 'filter-camera-raw' : 'select-all'); break;
+                    case 'a': e.preventDefault(); triggerAction(alt ? 'select-subject' : (shift ? 'filter-camera-raw' : 'select-all')); break;
+                    case 'f': e.preventDefault(); triggerAction('command-palette'); break;
+                    case 'w': e.preventDefault(); triggerAction('close-tab'); break;
+                    case "'": e.preventDefault(); triggerAction('toggle-grid'); break;
                     case 'd': e.preventDefault(); triggerAction('deselect'); break;
                     case 't': e.preventDefault(); triggerAction('free-transform'); break;
                     case 'j': e.preventDefault(); triggerAction('duplicate-layer'); break;
@@ -1745,10 +1924,33 @@
             }
         }
 
+        // Outside changes to the open project (another app, or an agent writing the .comp)
+        if (window.electronAPI && window.electronAPI.onProjectChanged) {
+            window.electronAPI.onProjectChanged(async (filePath) => {
+                const tab = DocumentTabs.active;
+                if (!tab || tab.filePath !== filePath) return;
+                if (!confirm(`${baseName(filePath)} was changed outside Compositor. Reload it?`)) return;
+                const readRes = await window.electronAPI.readFile(filePath);
+                if (!readRes.success) return;
+                loadProjectIntoEngine(await ProjectStore.deserializeProject(readRes.data, window.JSZip));
+                engine.notifyStatus('Reloaded changes made outside Compositor.');
+            });
+        }
+
+        // The navigator's picture follows edits
+        const renderDocument = engine.render.bind(engine);
+        engine.render = function () {
+            renderDocument();
+            if (window.NavigatorPanel) NavigatorPanel.schedulePicture();
+        };
+
         // Initialize display
         renderToolOptions();
         updateSwatches();
+        GridOverlay.init();
+        DocumentTabs.init();
         engine.fitToScreen();
+        syncViewState();
     </script>
 </body>
 </html>

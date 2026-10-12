@@ -24,6 +24,7 @@ describe('Renderer scripts load without Node integration', () => {
 
     it('engine.js and project-store.js evaluate in a context without require and define the engine', () => {
         const context = vm.createContext({ console, setTimeout, clearTimeout });
+        context.window = context;
         for (const src of scriptSrcs) {
             const code = fs.readFileSync(path.join(srcDir, src), 'utf8');
             vm.runInContext(code, context, { filename: src });
@@ -31,9 +32,20 @@ describe('Renderer scripts load without Node integration', () => {
         const result = vm.runInContext(`(() => {
             const eng = CompositorEngine.createHeadless(64, 48);
             eng.addLayer('Probe');
-            return { engine: typeof CompositorEngine, store: typeof ProjectStore, zip: typeof JSZip, layers: eng.layers.length };
+            return {
+                engine: typeof CompositorEngine, store: typeof ProjectStore, zip: typeof JSZip, layers: eng.layers.length,
+                ui: [typeof CurvesDialog, typeof GridOverlay, typeof NavigatorPanel, typeof CommandPalette, typeof DocumentTabs].join(','),
+                modules: [typeof VisionSegmentation, typeof CommandPaletteModel, typeof NavigatorGeometry, typeof projectTabOverflow,
+                    typeof CursorManager, typeof FloatingPanelController, typeof DownsampleCache, typeof CurvesSettings, typeof LayoutGrid].join(','),
+                grid: !!eng.layoutGrid
+            };
         })()`, context);
-        assert.deepEqual(JSON.parse(JSON.stringify(result)), { engine: 'function', store: 'function', zip: 'function', layers: 2 });
+        assert.deepEqual(JSON.parse(JSON.stringify(result)), {
+            engine: 'function', store: 'function', zip: 'function', layers: 2,
+            ui: 'object,object,object,object,object',
+            modules: Array(9).fill('function').join(','),
+            grid: true
+        });
     });
 
     it('the inline UI script is valid JavaScript', () => {
@@ -58,8 +70,9 @@ describe('Renderer scripts load without Node integration', () => {
 
     it('every engine method the UI calls exists', () => {
         const CompositorEngine = require('../src/engine.js');
-        const called = new Set([...inlineScript.matchAll(/engine\.(\w+)\(/g)].map(m => m[1]));
-        const missing = [...called].filter(name => typeof CompositorEngine.prototype[name] !== 'function');
+        const uiSources = fs.readdirSync(path.join(srcDir, 'ui')).map(f => fs.readFileSync(path.join(srcDir, 'ui', f), 'utf8')).join('\n');
+        const called = new Set([...(inlineScript + uiSources).matchAll(/engine\.(\w+)\(/g)].map(m => m[1]));
+        const missing = [...called].filter(name => !/^on[A-Z]/.test(name) && typeof CompositorEngine.prototype[name] !== 'function');
         assert.deepEqual(missing, []);
     });
 });

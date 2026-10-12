@@ -796,3 +796,56 @@ body.has-titlebar-overlay .titlebar {
 ::-webkit-scrollbar-thumb:hover {
     background: var(--border-light);
 }
+
+/* Document tabs */
+.document-tabs {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 30px;
+    padding: 0 6px;
+    background-color: var(--bg-darker);
+    border-bottom: 1px solid var(--border-color);
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+.document-tab {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 22px;
+    padding: 0 6px 0 10px;
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.document-tab:hover { background-color: var(--bg-hover); }
+.document-tab.active { background-color: var(--bg-light); color: var(--text-primary); }
+.document-tab-overflow { padding: 0 10px; color: var(--text-primary); }
+
+.document-tab-close {
+    border: none;
+    background: transparent;
+    color: inherit;
+    font-size: 13px;
+    width: 16px;
+    height: 16px;
+    line-height: 14px;
+    border-radius: 3px;
+    cursor: pointer;
+}
+
+.document-tab-close:hover { background-color: rgba(255, 255, 255, 0.12); }
+.document-tab-menu { top: 24px; left: 0; z-index: 3000; }
+
+/* Toggle items in the titlebar menus show a checkmark when on */
+.dropdown-item[data-check] { padding-left: 24px; position: relative; }
+.dropdown-item[data-check].checked::before {
+    content: '✓';
+    position: absolute;
+    left: 8px;
+}

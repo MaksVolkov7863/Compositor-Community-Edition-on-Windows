@@ -14,6 +14,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
     readFile: (filePath) => ipcRenderer.invoke('fs-read-file', filePath),
     writeFile: (filePath, data) => ipcRenderer.invoke('fs-write-file', filePath, data),
     
+    // Images Chromium can't decode (TIFF, HEIC, PSD) and TIFF export
+    decodeImage: (filePath) => ipcRenderer.invoke('image-decode', filePath),
+    exportTIFF: (options) => ipcRenderer.invoke('image-export-tiff', options),
+
+    // Project file watching and native menu state
+    watchProject: (filePath) => ipcRenderer.send('project-watch', filePath || null),
+    onProjectChanged: (callback) => {
+        ipcRenderer.on('project-changed', (event, filePath) => callback(filePath));
+    },
+    setMenuState: (state) => ipcRenderer.send('menu-state', state),
+
     // Menu events
     onMenuAction: (callback) => {
         ipcRenderer.on('menu-action', (event, action, data) => callback(action, data));
