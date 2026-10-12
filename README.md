@@ -64,7 +64,7 @@ brew install --cask robbietilton-compositor
 
 ### Selections
 - Rectangle and Ellipse Marquee, Freehand and Polygonal Lasso, and the Magic tool — Wand selects by color, Object traces whatever you click (Tab switches)
-- Select Subject (macOS via Apple Vision; Windows via AI background worker), and Expand, Contract and Feather on any selection
+- Select Subject (macOS via Apple Vision; Windows via a local saliency heuristic), and Expand, Contract and Feather on any selection
 - Add to and subtract from selections, move the outline, or move and duplicate the pixels inside
 - Load a layer's pixels or a mask as a selection
 - Content-Aware Fill, which can also extend an image past its edges
@@ -82,7 +82,7 @@ brew install --cask robbietilton-compositor
 - Camera Raw filter: light, color, curves, color mixer, color grading, detail, optics and geometry, in a panel beside the canvas
 - Levels (with Auto), Curves, Hue/Saturation, Exposure, Gradient Map, Grain, Black & White, Color Balance and Invert
 - Gaussian Blur and Motion Blur that spread past a layer's edges
-- Add Noise, Vignette, Bloom / Glow, Dither, Scanlines, Tonal Contrast, Lens Correction and Remove Background (macOS via Apple Vision; Windows via AI worker)
+- Add Noise, Vignette, Bloom / Glow, Dither, Scanlines, Tonal Contrast, Lens Correction and Remove Background (macOS via Apple Vision; Windows via a local saliency heuristic)
 - Live previews, limited to the selection when there is one
 - Last Filter (⌃⌘F) runs the last filter again with the same settings
 
@@ -95,7 +95,7 @@ brew install --cask robbietilton-compositor
 - Canvas Size, Image Size and Trim
 - A Navigator minimap in the canvas's corner from 300% zoom: the whole document in small with a box around the view; click or drag to move there (View › Navigator)
 - Sharp high-quality downsampling when zoomed out, and a pixel grid when zoomed in
-- Import JPEG, PNG, WebP, SVG, and Photoshop PSD and PSB (Large Document, 8-bit RGB; not CMYK). Photoshop folders, masks, blend modes, fill rectangles/ellipses, and simple horizontal text stay editable; other vectors and vertical text become pixels. A conversion report is shown before anything is applied. *(macOS supports HEIC/TIFF via system ImageIO; Windows supports HEIC and TIFF via libheif-js and UTIF WASM decoders)*.
+- Import JPEG, PNG, WebP, SVG, and Photoshop PSD and PSB (Large Document, 8-bit RGB; not CMYK). Photoshop folders, masks, blend modes, fill rectangles/ellipses, and simple horizontal text stay editable; other vectors and vertical text become pixels. A conversion report is shown before anything is applied. *(macOS supports HEIC/TIFF via system ImageIO; Windows decodes HEIC with libheif-js and TIFF with UTIF, and opens PSD/PSB as a flattened composite only)*.
 - Large documents: memory budget scaling, with oversized layers cropped cleanly to the canvas rectangle when needed
 - Export PNG, Export JPEG, and Export As for PNG, JPEG or WebP at chosen scale, with live preview, JPEG quality and file size; Copy Merged
 - Keep working while a project saves
@@ -109,25 +109,26 @@ brew install --cask robbietilton-compositor
 ## Platforms
 
 ### Windows (Compositor for Windows - Community Edition)
-A standalone desktop version with full feature parity for Windows 10 and 11, maintained by [@MaksVolkov7863](https://github.com/MaksVolkov7863):
-- **Cross-Platform Compatibility**: Full support for `.comp` project files up to **Manifest Version 9** (including backward compatibility with versions 1–8). Projects saved on macOS open seamlessly in the Windows edition and vice versa.
-- **Automated CI/CD Builds**: Continuous builds on GitHub Actions on every push to `main` and tagged releases (`v*`). Ready-to-run setup installers (`Compositor-Setup-1.3.3.exe`) and portable executables are available from [GitHub Releases](https://github.com/MaksVolkov7863/Compositor-Community-Edition-on-Windows/releases) and Artifacts.
+A standalone Electron port for Windows 10 and 11, maintained by [@MaksVolkov7863](https://github.com/MaksVolkov7863). It covers most of the macOS feature set; known differences are listed below.
+- **Project files**: the Windows edition reads and writes `.comp` as a zip archive (manifest versions 1–9). The macOS app stores `.comp` as a package directory, so projects are not yet directly interchangeable.
+- **Automated CI/CD Builds**: GitHub Actions builds on pushes to `main` and tagged releases (`v*`); installers and portable executables are on [GitHub Releases](https://github.com/MaksVolkov7863/Compositor-Community-Edition-on-Windows/releases) and as workflow artifacts.
 - **Local Development**:
   ```bash
   cd windows
   npm install
   npm start
   ```
-- **Automated Test Suite & Parity Guard**:
+- **Tests**:
   ```bash
   cd windows
-  npm test          # Runs all 61 test suites (221 unit and regression tests)
-  npm run parity    # Verifies 100% upstream test suite and API coverage across all 79 macOS suites
+  npm test          # unit and regression tests (node:test)
+  npm run smoke     # launches Electron and clicks through menus, dialogs and file formats
+  npm run parity    # maps each macOS test suite to a Windows test file (a coverage map, not a behavioural proof)
   ```
-- **Architectural Mapping**:
-  - **GPU Compositing**: WebGL2 fragment shaders with CPU headless fallback (mirroring macOS Metal shaders).
-  - **Vision Features**: Select Subject and Remove Background utilize an ONNX Web Runtime AI worker for local inference.
-  - **File Formats**: Native support for PNG, JPEG, WebP, SVG, PSD (8-bit), and PSB Large Documents; WASM decoders for HEIC (libheif-js) and TIFF (UTIF) with full round-trip export.
+- **Differences from macOS**:
+  - **Select Subject / Remove Background** use a local colour-contrast saliency heuristic, not Apple Vision or an ML model. They work well on a subject against a plain background and poorly on busy photos.
+  - **File formats**: PNG, JPEG, WebP, SVG; HEIC/HEIF (libheif-js, import only); TIFF (UTIF, import and export); PSD/PSB are opened as the flattened composite (8-bit RGB/Gray).
+  - **GPU**: compositing runs on Canvas 2D; the WebGL pipeline module is not used yet.
 - **Packaging (Windows .exe installer & portable)**:
   ```bash
   cd windows
