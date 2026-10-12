@@ -29,6 +29,17 @@ class ProjectDigest {
     }
 
     /**
+     * Digest of a project on disk: a .comp package directory, or a single .comp file
+     * (the Windows edition saves projects as one zip file).
+     */
+    static fromPath(projectPath) {
+        if (!projectPath || !fs.existsSync(projectPath)) return null;
+        const stat = fs.statSync(projectPath);
+        if (stat.isDirectory()) return ProjectDigest.fromDirectory(projectPath);
+        return crypto.createHash('sha256').update(fs.readFileSync(projectPath)).digest('hex');
+    }
+
+    /**
      * Computes digest directly from a saved .comp directory on disk
      */
     static fromDirectory(dirPath) {
@@ -58,6 +69,7 @@ class ProjectWatcher extends EventEmitter {
         this.projectPath = projectPath;
         this.currentDigest = options.initialDigest || null;
         this.debounceMs = options.debounceMs || 200;
+        this.pollMs = options.pollMs || 500;
         this.isWatching = false;
         this._fsWatcher = null;
         this._debounceTimer = null;
@@ -69,14 +81,24 @@ class ProjectWatcher extends EventEmitter {
         this.isWatching = true;
 
         if (!this.currentDigest) {
-            this.currentDigest = ProjectDigest.fromDirectory(this.projectPath);
+            this.currentDigest = ProjectDigest.fromPath(this.projectPath);
         }
 
         try {
-            this._fsWatcher = fs.watch(this.projectPath, { recursive: true }, (eventType, filename) => {
-                if (this._isSaving) return;
-                this._onFsEvent();
-            });
+            if (fs.statSync(this.projectPath).isDirectory()) {
+                this._fsWatcher = fs.watch(this.projectPath, { recursive: true }, () => {
+                    if (this._isSaving) return;
+                    this._onFsEvent();
+                });
+            } else {
+                // A single file: poll its stat, which also survives editors that save by
+                // writing a new file and renaming it over the old one.
+                this._fileListener = () => {
+                    if (this._isSaving) return;
+                    this._onFsEvent();
+                };
+                fs.watchFile(this.projectPath, { interval: this.pollMs || 500 }, this._fileListener);
+            }
         } catch (e) {
             // Fallback: non-recursive watch or ignore if unsupportable
         }
@@ -90,6 +112,10 @@ class ProjectWatcher extends EventEmitter {
             try { this._fsWatcher.close(); } catch (e) {}
             this._fsWatcher = null;
         }
+        if (this._fileListener) {
+            fs.unwatchFile(this.projectPath, this._fileListener);
+            this._fileListener = null;
+        }
     }
 
     markInternalSaveStart() {
@@ -97,7 +123,7 @@ class ProjectWatcher extends EventEmitter {
     }
 
     markInternalSaveEnd() {
-        this.currentDigest = ProjectDigest.fromDirectory(this.projectPath);
+        this.currentDigest = ProjectDigest.fromPath(this.projectPath);
         setTimeout(() => {
             this._isSaving = false;
         }, 100);
@@ -112,7 +138,7 @@ class ProjectWatcher extends EventEmitter {
 
     checkNow() {
         if (!fs.existsSync(this.projectPath)) return false;
-        const newDigest = ProjectDigest.fromDirectory(this.projectPath);
+        const newDigest = ProjectDigest.fromPath(this.projectPath);
         if (!newDigest) return false;
 
         if (this.currentDigest && newDigest !== this.currentDigest) {

@@ -298,8 +298,72 @@ class PSDReader {
             depth,
             colorMode,
             resolution,
-            layers
+            layers,
+            imageDataOffset: offset
         };
+    }
+
+    /**
+     * Decodes the flattened composite (the Image Data section every PSD/PSB carries) to RGBA.
+     * 8-bit RGB and Grayscale, raw or PackBits (RLE); alpha from a fourth/second channel if present.
+     */
+    static composite(buf, doc = null) {
+        const buffer = Buffer.isBuffer(buf) ? buf : Buffer.from(buf);
+        doc = doc || PSDReader.read(buffer);
+        const { width, height, channels, depth, colorMode, isPSB } = doc;
+        if (depth !== 8) throw new Error(`Unsupported PSD bit depth: ${depth}`);
+        if (colorMode !== 3 && colorMode !== 1) throw new Error(`Unsupported PSD color mode: ${colorMode}`);
+        let offset = doc.imageDataOffset;
+        if (offset + 2 > buffer.length) throw new Error('PSD has no composite image data');
+        const compression = buffer.readUInt16BE(offset);
+        offset += 2;
+        const planeSize = width * height;
+        const planes = [];
+        if (compression === 0) {
+            for (let c = 0; c < channels; c++) {
+                planes.push(buffer.subarray(offset, offset + planeSize));
+                offset += planeSize;
+            }
+        } else if (compression === 1) {
+            const countSize = isPSB ? 4 : 2;
+            const counts = [];
+            for (let r = 0; r < channels * height; r++) {
+                counts.push(isPSB ? buffer.readUInt32BE(offset) : buffer.readUInt16BE(offset));
+                offset += countSize;
+            }
+            for (let c = 0; c < channels; c++) {
+                const plane = new Uint8Array(planeSize);
+                for (let row = 0; row < height; row++) {
+                    const end = offset + counts[c * height + row];
+                    let x = 0;
+                    const base = row * width;
+                    while (offset < end && x < width) {
+                        const n = buffer.readInt8(offset++);
+                        if (n >= 0) {
+                            for (let k = 0; k <= n && x < width; k++) plane[base + x++] = buffer[offset++];
+                        } else if (n !== -128) {
+                            const v = buffer[offset++];
+                            for (let k = 0; k < 1 - n && x < width; k++) plane[base + x++] = v;
+                        }
+                    }
+                    offset = end;
+                }
+                planes.push(plane);
+            }
+        } else {
+            throw new Error(`Unsupported PSD compression: ${compression}`);
+        }
+        const data = new Uint8ClampedArray(planeSize * 4);
+        const gray = colorMode === 1;
+        const alphaPlane = gray ? (channels > 1 ? planes[1] : null) : (channels > 3 ? planes[3] : null);
+        for (let i = 0; i < planeSize; i++) {
+            const j = i * 4;
+            data[j] = planes[0][i];
+            data[j + 1] = gray ? planes[0][i] : planes[1][i];
+            data[j + 2] = gray ? planes[0][i] : planes[2][i];
+            data[j + 3] = alphaPlane ? alphaPlane[i] : 255;
+        }
+        return { width, height, data };
     }
 
     /**

@@ -222,7 +222,9 @@ class VisionSegmentation {
     }
 }
 
-module.exports = {
-    VisionSegmentation,
-    VisionFailure
-};
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { VisionSegmentation, VisionFailure };
+} else {
+    globalThis.VisionSegmentation = VisionSegmentation;
+    globalThis.VisionFailure = VisionFailure;
+}

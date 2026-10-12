@@ -8,6 +8,7 @@ const { applyDither, applyScanlines, applyVignette, applySharpen, applyBloomGlow
 const { normalizeRotation, snappedResize, cropLayerToCanvas } = require('./transform');
 const { validateOuterGlow, validateInnerGlow, validateColorOverlay } = require('./layer-effects');
 const { unitToPixels, pixelsToUnitText } = require('./units');
+const { rasterizePolygon, invertMask, maskBounds, featherMask, growMask } = require('./selection-mask');
 
 module.exports = {
     createMockCanvas,
@@ -27,5 +28,10 @@ module.exports = {
     validateInnerGlow,
     validateColorOverlay,
     unitToPixels,
-    pixelsToUnitText
+    pixelsToUnitText,
+    rasterizePolygon,
+    invertMask,
+    maskBounds,
+    featherMask,
+    growMask
 };

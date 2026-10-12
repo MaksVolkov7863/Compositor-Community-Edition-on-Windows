@@ -22,7 +22,12 @@ const {
     validateInnerGlow: moduleValidateInnerGlow,
     validateColorOverlay: moduleValidateColorOverlay,
     unitToPixels: moduleUnitToPixels,
-    pixelsToUnitText: modulePixelsToUnitText
+    pixelsToUnitText: modulePixelsToUnitText,
+    rasterizePolygon,
+    invertMask,
+    maskBounds,
+    featherMask,
+    growMask
 } = loadEngineSubmodules();
 
 // The renderer runs with contextIsolation and without nodeIntegration, so there is no
@@ -41,6 +46,10 @@ function loadEngineSubmodules() {
 // main process, but not in the sandboxed renderer. Fail with a clear message there.
 function requireNodeModule(modulePath, feature) {
     if (typeof require !== 'function') {
+        // Pure-JS modules the renderer loads with a <script> tag
+        if (modulePath === './vision-segmentation' && globalThis.VisionSegmentation) {
+            return { VisionSegmentation: globalThis.VisionSegmentation, VisionFailure: globalThis.VisionFailure };
+        }
         throw new Error(`${feature} is not available in the Windows renderer yet`);
     }
     return require(modulePath);
@@ -108,6 +117,9 @@ class CompositorEngine {
         this.snapToLayers = true;
         this.snapToGuides = true;
         this.snapToGrid = false;
+        // View > Grid Settings…: 64 px majors split in eight, as on the Mac
+        const gridModule = typeof require === 'function' ? require('./layout-grid') : globalThis;
+        this.layoutGrid = gridModule.LayoutGrid ? new gridModule.LayoutGrid(64, 8) : null;
 
         // History
         this.history = [];
@@ -1148,8 +1160,49 @@ class CompositorEngine {
             path.lineTo(this.lassoPoints[i].x, this.lassoPoints[i].y);
         }
         path.closePath();
-        this.selection = { type: 'lasso' };
+        const mask = rasterizePolygon(this.lassoPoints, this.width, this.height);
+        this.selection = {
+            type: 'lasso',
+            mask,
+            width: this.width,
+            height: this.height,
+            bounds: maskBounds(mask, this.width, this.height) || { x: 0, y: 0, width: 0, height: 0 }
+        };
         this.selectionPath = path;
+    }
+
+    // Replace the selection with a 0..255 mask; outlines it for the marching ants.
+    setMaskSelection(mask, type = 'mask', extra = {}) {
+        const bounds = maskBounds(mask, this.width, this.height, 128);
+        if (!bounds) {
+            this.deselect();
+            return false;
+        }
+        this.selection = Object.assign({ type, mask, width: this.width, height: this.height, bounds }, extra);
+        this.createPathFromMask(mask, this.width, this.height);
+        this.render();
+        return true;
+    }
+
+    // The selection as a document-sized mask, rasterizing older path-only selections.
+    selectionMask() {
+        if (!this.selection) return null;
+        const sel = this.selection;
+        if (sel.mask && sel.width === this.width && sel.height === this.height) return sel.mask;
+        let mask = null;
+        if (sel.bounds) {
+            const b = sel.bounds;
+            mask = rasterizePolygon([
+                { x: b.x, y: b.y }, { x: b.x + b.width, y: b.y },
+                { x: b.x + b.width, y: b.y + b.height }, { x: b.x, y: b.y + b.height }
+            ], this.width, this.height);
+        }
+        if (mask) {
+            sel.mask = mask;
+            sel.width = this.width;
+            sel.height = this.height;
+        }
+        return mask;
     }
 
     selectAll() {
@@ -1165,10 +1218,20 @@ class CompositorEngine {
 
     invertSelection() {
         if (!this.selection) return;
+        const mask = this.selectionMask();
         // Invert path using evenodd filling
         const path = new Path2D();
         path.rect(0, 0, this.width, this.height);
         if (this.selectionPath) path.addPath(this.selectionPath);
+        if (mask) {
+            const inverted = invertMask(mask);
+            const bounds = maskBounds(inverted, this.width, this.height, 128);
+            if (!bounds) {
+                this.deselect();
+                return;
+            }
+            this.selection = { type: 'inverse', mask: inverted, width: this.width, height: this.height, bounds };
+        }
         this.selectionPath = path;
         this.render();
     }
@@ -1218,7 +1281,7 @@ class CompositorEngine {
         }
 
         // Trace bounding contour for selection path
-        this.selection = { mask, width: w, height: h };
+        this.selection = { type: 'wand', mask, width: w, height: h, bounds: maskBounds(mask, w, h) };
         this.createPathFromMask(mask, w, h);
         this.render();
     }
@@ -1230,7 +1293,7 @@ class CompositorEngine {
             let inRun = false;
             let startX = 0;
             for (let x = 0; x < w; x += 2) {
-                if (mask[y * w + x] > 0) {
+                if (mask[y * w + x] >= 128) {
                     if (!inRun) { inRun = true; startX = x; }
                 } else if (inRun) {
                     inRun = false;
@@ -1997,6 +2060,7 @@ class CompositorEngine {
         this.zoomTo(Math.max(0.05, fitScale));
         this.viewport.panX = (containerWidth - this.width * this.viewport.zoom) / 2;
         this.viewport.panY = (containerHeight - this.height * this.viewport.zoom) / 2;
+        if (this.onZoomChange) this.onZoomChange(this.viewport.zoom);
     }
 
     zoomTo(level) {
@@ -2337,6 +2401,18 @@ class CompositorEngine {
         this.render();
     }
 
+    // Curves… with a CurvesSettings (composite and per-channel curves).
+    applyCurvesSettings(settings) {
+        const layer = this.getActiveLayer();
+        if (!layer || !layer.ctx || !settings || !settings.isValid) return false;
+        const imgData = layer.ctx.getImageData(0, 0, layer.width, layer.height);
+        settings.applyTo(imgData);
+        layer.ctx.putImageData(imgData, 0, 0);
+        this.recordHistory('Curves');
+        this.render();
+        return true;
+    }
+
     applyExposure(exposure = 0, offset = 0, gamma = 1.0) {
         const layer = this.getActiveLayer();
         if (!layer) return;
@@ -2489,8 +2565,13 @@ class CompositorEngine {
         }
 
         if (this.snapToGrid && this.showGrid) {
-            for (let x = 0; x <= this.width; x += 8) xs.add(x);
-            for (let y = 0; y <= this.height; y += 8) ys.add(y);
+            if (this.layoutGrid) {
+                for (const x of this.layoutGrid.lines(this.width)) xs.add(x);
+                for (const y of this.layoutGrid.lines(this.height)) ys.add(y);
+            } else {
+                for (let x = 0; x <= this.width; x += 8) xs.add(x);
+                for (let y = 0; y <= this.height; y += 8) ys.add(y);
+            }
         }
 
         return { xs: Array.from(xs).sort((a, b) => a - b), ys: Array.from(ys).sort((a, b) => a - b) };
@@ -3200,18 +3281,7 @@ class CompositorEngine {
             throw new VisionFailure();
         }
 
-        this.selection = {
-            type: 'subject',
-            mask: docMask,
-            width: this.width,
-            height: this.height,
-            bounds: {
-                x: minX,
-                y: minY,
-                width: maxX - minX + 1,
-                height: maxY - minY + 1
-            }
-        };
+        this.setMaskSelection(docMask, 'subject');
 
         this.recordHistory('Select Subject');
         this.render();
@@ -3326,6 +3396,14 @@ class CompositorEngine {
         const layer = this.getActiveLayer();
         if (!layer || !layer.ctx || layer.isGroup) return false;
         const ctx = layer.ctx;
+        const mask = this.selection ? this.selectionMask() : null;
+        if (mask) {
+            this.fillThroughMask(layer, color, mask);
+            this.recordHistory('Fill');
+            this.render();
+            this.notifyUI();
+            return true;
+        }
         ctx.save();
         ctx.fillStyle = color;
         if (this.selection && this.selectionPath) {
@@ -3342,6 +3420,34 @@ class CompositorEngine {
         this.render();
         this.notifyUI();
         return true;
+    }
+
+    // Blend `color` into the layer weighted by a document mask (soft feathered edges included).
+    fillThroughMask(layer, color, mask) {
+        const probe = this.createCanvas(1, 1).getContext('2d');
+        probe.fillStyle = color;
+        probe.fillRect(0, 0, 1, 1);
+        const [cr, cg, cb] = probe.getImageData(0, 0, 1, 1).data;
+        const img = layer.ctx.getImageData(0, 0, layer.width, layer.height);
+        const d = img.data;
+        for (let ly = 0; ly < layer.height; ly++) {
+            const dy = ly + layer.y;
+            if (dy < 0 || dy >= this.height) continue;
+            for (let lx = 0; lx < layer.width; lx++) {
+                const dx = lx + layer.x;
+                if (dx < 0 || dx >= this.width) continue;
+                const a = mask[dy * this.width + dx] / 255;
+                if (a === 0) continue;
+                const i = (ly * layer.width + lx) * 4;
+                const da = d[i + 3] / 255;
+                const outA = a + da * (1 - a);
+                d[i] = Math.round((cr * a + d[i] * da * (1 - a)) / outA);
+                d[i + 1] = Math.round((cg * a + d[i + 1] * da * (1 - a)) / outA);
+                d[i + 2] = Math.round((cb * a + d[i + 2] * da * (1 - a)) / outA);
+                d[i + 3] = Math.round(outA * 255);
+            }
+        }
+        layer.ctx.putImageData(img, 0, 0);
     }
 
     // Copy Merged: the visible composite inside the selection (or the whole canvas).
@@ -3363,74 +3469,30 @@ class CompositorEngine {
         return this.clipboard;
     }
 
-    // Expand (radius > 0) or contract (radius < 0) a mask-based selection.
+    // Expand (radius > 0) or contract (radius < 0) any selection, as Select > Modify does.
     growSelection(radius) {
-        if (!this.selection || !this.selection.mask || !radius) return false;
-        const w = this.selection.width, h = this.selection.height;
-        const src = this.selection.mask;
-        const r = Math.round(Math.abs(radius));
-        const expand = radius > 0;
-        const pass = (input, horizontal) => {
-            const out = new Uint8Array(w * h);
-            for (let y = 0; y < h; y++) {
-                for (let x = 0; x < w; x++) {
-                    let v = expand ? 0 : 255;
-                    for (let k = -r; k <= r; k++) {
-                        const nx = horizontal ? x + k : x;
-                        const ny = horizontal ? y : y + k;
-                        const inside = nx >= 0 && ny >= 0 && nx < w && ny < h;
-                        const sample = inside ? input[ny * w + nx] : 0;
-                        v = expand ? Math.max(v, sample) : Math.min(v, sample);
-                    }
-                    out[y * w + x] = v;
-                }
-            }
-            return out;
-        };
-        const mask = pass(pass(src, true), false);
-        let minX = w, minY = h, maxX = -1, maxY = -1;
-        for (let y = 0; y < h; y++) {
-            for (let x = 0; x < w; x++) {
-                if (mask[y * w + x] > 0) {
-                    if (x < minX) minX = x;
-                    if (x > maxX) maxX = x;
-                    if (y < minY) minY = y;
-                    if (y > maxY) maxY = y;
-                }
-            }
-        }
-        if (maxX < 0) {
-            this.deselect();
-            return true;
-        }
-        this.selection = { type: 'mask', mask, width: w, height: h, bounds: { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 } };
-        this.createPathFromMask(mask, w, h);
-        this.render();
+        const mask = this.selectionMask();
+        if (!mask || !radius) return false;
+        const grown = growMask(mask, this.width, this.height, radius);
+        this.setMaskSelection(grown, this.selection.type);
         return true;
     }
 
     featherSelection(radius = 5) {
-        if (!this.selection || !this.selection.mask) return;
-        const w = this.selection.width, h = this.selection.height;
-        const original = this.selection.mask;
-        const feathered = new Uint8Array(w * h);
-
-        const r = Math.max(1, Math.round(radius));
-        for (let y = 0; y < h; y++) {
-            for (let x = 0; x < w; x++) {
-                let sum = 0, cnt = 0;
-                for (let kx = -r; kx <= r; kx++) {
-                    const nx = x + kx;
-                    if (nx >= 0 && nx < w) {
-                        sum += original[y * w + nx];
-                        cnt++;
-                    }
-                }
-                feathered[y * w + x] = Math.round(sum / cnt);
-            }
+        if (!this.selection) return false;
+        const w = this.selection.mask && this.selection.width ? this.selection.width : this.width;
+        const h = this.selection.mask && this.selection.height ? this.selection.height : this.height;
+        const mask = this.selection.mask || this.selectionMask();
+        if (!mask) return false;
+        const type = this.selection.type;
+        const feathered = featherMask(mask, w, h, Math.max(1, radius));
+        if (w === this.width && h === this.height) {
+            if (!this.setMaskSelection(feathered, type)) return true;
+        } else {
+            this.selection.mask = feathered;
         }
-        this.selection.mask = feathered;
         this.selection.feather = radius;
+        return true;
     }
 
     static createHeadless(width = 800, height = 600) {

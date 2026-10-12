@@ -14,7 +14,7 @@ const { isHEIC, decodeHEIC } = require('./importers/heic-importer');
 
 let PSDReader = null;
 try {
-    PSDReader = require('./psd-reader');
+    PSDReader = require('./psd-reader').PSDReader;
 } catch (_) {}
 
 const DocumentLimits = {
@@ -362,10 +362,10 @@ class ImageImporter {
                 throw new ImageImportError('unreadable', 'PSD parser not available');
             }
             try {
-                const psdResult = PSDReader.parse(buffer);
+                const psdResult = PSDReader.composite(buffer);
                 width = psdResult.width;
                 height = psdResult.height;
-                data = psdResult.composite ? psdResult.composite.data : new Uint8ClampedArray(width * height * 4);
+                data = psdResult.data;
             } catch (err) {
                 throw new ImageImportError('unreadable', err.message);
             }
